@@ -1,81 +1,76 @@
 function Get-DbaPermission {
     <#
-        .SYNOPSIS
-            Get a list of Server and Database level permissions
+    .SYNOPSIS
+        Get a list of Server and Database level permissions
 
-        .DESCRIPTION
-            Retrieves a list of permissions
+    .DESCRIPTION
+        Retrieves a list of permissions
 
-            Permissions link principals to securables.
-            Principals exist on Windows, Instance and Database level.
-            Securables exist on Instance and Database level.
-            A permission state can be GRANT, DENY or REVOKE.
-            The permission type can be SELECT, CONNECT, EXECUTE and more.
+        Permissions link principals to securables.
+        Principals exist on Windows, Instance and Database level.
+        Securables exist on Instance and Database level.
+        A permission state can be GRANT, DENY or REVOKE.
+        The permission type can be SELECT, CONNECT, EXECUTE and more.
 
-            See https://msdn.microsoft.com/en-us/library/ms191291.aspx for more information
+        See https://msdn.microsoft.com/en-us/library/ms191291.aspx for more information
 
-        .PARAMETER SqlInstance
-            The SQL Server instance to connect to.
+    .PARAMETER SqlInstance
+        The target SQL Server instance or instances. Defaults to localhost.
 
-        .PARAMETER SqlCredential
-            Allows you to login to servers using SQL Logins instead of Windows Authentication (AKA Integrated or Trusted). To use:
+    .PARAMETER SqlCredential
+        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
 
-            $scred = Get-Credential, then pass $scred object to the -SqlCredential parameter.
+    .PARAMETER Database
+        Specifies one or more database(s) to process. If unspecified, all databases will be processed.
 
-            Windows Authentication will be used if SqlCredential is not specified. SQL Server does not accept Windows credentials being passed as credentials.
+    .PARAMETER ExcludeDatabase
+        Specifies one or more database(s) to exclude from processing.
 
-            To connect as a different Windows user, run PowerShell as that user.
+    .PARAMETER IncludeServerLevel
+        If this switch is enabled, information about Server Level Permissions will be output.
 
-        .PARAMETER Database
-            Specifies one or more database(s) to process. If unspecified, all databases will be processed.
+    .PARAMETER NoSystemObjects
+        If this switch is enabled, permissions on system securables will be excluded.
 
-        .PARAMETER ExcludeDatabase
-            Specifies one or more database(s) to exclude from processing.
+    .PARAMETER EnableException
+        If this switch is enabled exceptions will be thrown to the caller, which will need to perform its own exception processing. Otherwise, the function will try to catch the exception, interpret it and provide a friendly error message.
 
-        .PARAMETER IncludeServerLevel
-            If this switch is enabled, information about Server Level Permissions will be output.
+    .NOTES
+        Tags: Permissions, Databases
+        Author: Klaas Vandenberghe (@PowerDBAKlaas)
 
-        .PARAMETER NoSystemObjects
-            If this switch is enabled, permissions on system securables will be excluded.
+        Website: https://dbatools.io
+        Copyright: (c) 2018 by dbatools, licensed under MIT
+        License: MIT https://opensource.org/licenses/MIT
 
-        .PARAMETER EnableException
-            If this switch is enabled exceptions will be thrown to the caller, which will need to perform its own exception processing. Otherwise, the function will try to catch the exception, interpret it and provide a friendly error message.
+    .LINK
+        https://dbatools.io/Get-DbaPermission
 
-        .NOTES
-            Tags: Permissions, Databases
-            Author: Klaas Vandenberghe ( @PowerDBAKlaas )
+    .EXAMPLE
+        PS C:\> Get-DbaPermission -SqlInstance ServerA\sql987
 
-            Website: https://dbatools.io
-            Copyright: (C) Chrissy LeMaire, clemaire@gmail.com
-            License: GNU GPL v3 https://opensource.org/licenses/GPL-3.0
+        Returns a custom object with Server name, Database name, permission state, permission type, grantee and securable.
 
-        .LINK
-            https://dbatools.io/Get-DbaPermission
+    .EXAMPLE
+        PS C:\> Get-DbaPermission -SqlInstance ServerA\sql987 | Format-Table -AutoSize
 
-        .EXAMPLE
-            Get-DbaPermission -SqlInstance ServerA\sql987
+        Returns a formatted table displaying Server, Database, permission state, permission type, grantee, granteetype, securable and securabletype.
 
-            Returns a custom object with Server name, Database name, permission state, permission type, grantee and securable.
+    .EXAMPLE
+        PS C:\> Get-DbaPermission -SqlInstance ServerA\sql987 -NoSystemObjects -IncludeServerLevel
 
-        .EXAMPLE
-            Get-DbaPermission -SqlInstance ServerA\sql987 | Format-Table -AutoSize
+        Returns a custom object with Server name, Database name, permission state, permission type, grantee and securable
+        in all databases and on the server level, but not on system securables.
 
-            Returns a formatted table displaying Server, Database, permission state, permission type, grantee, granteetype, securable and securabletype.
+    .EXAMPLE
+        PS C:\> Get-DbaPermission -SqlInstance sql2016 -Database master
 
-        .EXAMPLE
-            Get-DbaPermission -SqlInstance ServerA\sql987 -NoSystemObjects -IncludeServerLevel
+        Returns a custom object with permissions for the master database.
 
-            Returns a custom object with Server name, Database name, permission state, permission type, grantee and securable
-            in all databases and on the server level, but not on system securables.
-
-        .EXAMPLE
-            Get-DbaPermission -SqlInstance sql2016 -Database master
-
-            Returns a custom object with permissions for the master database.
-    #>
+#>
     [CmdletBinding()]
     param (
-        [parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [parameter(Mandatory, ValueFromPipeline)]
         [Alias("ServerInstance", "SqlServer")]
         [DbaInstance[]]$SqlInstance,
         [Alias("Credential")]
@@ -85,7 +80,8 @@ function Get-DbaPermission {
         [object[]]$ExcludeDatabase,
         [switch]$IncludeServerLevel,
         [switch]$NoSystemObjects,
-        [switch][Alias('Silent')]$EnableException
+        [Alias('Silent')]
+        [switch]$EnableException
     )
     begin {
         if ($NoSystemObjects) {
@@ -217,12 +213,10 @@ function Get-DbaPermission {
 
     process {
         foreach ($instance in $SqlInstance) {
-            Write-Message -Level Verbose -Message "Connecting to $instance."
 
             try {
                 $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $sqlcredential -MinimumVersion 9
-            }
-            catch {
+            } catch {
                 Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
@@ -245,7 +239,7 @@ function Get-DbaPermission {
                 Write-Message -Level Verbose -Message "Processing $db on $instance."
 
                 if ($db.IsAccessible -eq $false) {
-                    Write-Warning "The database $db is not accessible. Skipping database."
+                    Write-Message -Level Warning -Message "The database $db is not accessible. Skipping database."
                     Continue
                 }
 
@@ -255,3 +249,4 @@ function Get-DbaPermission {
         }
     }
 }
+

@@ -1,4 +1,4 @@
-function Invoke-DbaDatabaseCorruption {
+function Invoke-DbaDbCorruption {
     <#
       .SYNOPSIS
       Utilizes the DBCC WRITEPAGE functionality  to corrupt a specific database table for testing.  In no uncertain terms, this is a non-production command.
@@ -13,9 +13,7 @@ function Invoke-DbaDatabaseCorruption {
       The SQL Server instance holding the databases to be removed.You must have sysadmin access and Server version must be SQL Server version 2000 or higher.
 
       .PARAMETER SqlCredential
-      Allows you to login to Servers using SQL Logins instead of Windows Authentication (AKA Integrated or Trusted). To use:
-      $cred = Get-Credential, this pass this $cred to the param.
-      Windows Authentication will be used if SqlCredential is not specified. SQL Server does not accept Windows credentials being passed as credentials. To connect as a different Windows user, run PowerShell as that user.
+      Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
 
       .PARAMETER Database
       The single database you would like to corrupt, this command does not support multiple databases (on purpose.)
@@ -39,23 +37,23 @@ function Invoke-DbaDatabaseCorruption {
       Author: Constantine Kokkinos (@mobileck https://constantinekokkinos.com)
       Reference: https://www.sqlskills.com/blogs/paul/dbcc-writepage/
       Website: https://dbatools.io
-      Copyright: (C) Chrissy LeMaire, clemaire@gmail.com
-      License: GNU GPL v3 https://opensource.org/licenses/GPL-3.0
+      Copyright: (c) 2018 by dbatools, licensed under MIT
+      License: MIT https://opensource.org/licenses/MIT
 
       .LINK
-      https://dbatools.io/Invoke-DbaDatabaseCorruption
+      https://dbatools.io/Invoke-DbaDbCorruption
 
       .EXAMPLE
-      Invoke-DbaDatabaseCorruption -SqlInstance sql2016 -Database containeddb
+      Invoke-DbaDbCorruption -SqlInstance sql2016 -Database containeddb
       Prompts for confirmation then selects the first table in database containeddb and corrupts it (by putting database into single user mode, writing to garbage to its first non-iam page, and returning it to multi-user.)
 
       .EXAMPLE
-      Invoke-DbaDatabaseCorruption -SqlInstance sql2016 -Database containeddb -Table Customers -Confirm:$false
+      Invoke-DbaDbCorruption -SqlInstance sql2016 -Database containeddb -Table Customers -Confirm:$false
       Does not prompt and immediately corrupts table customers in database containeddb on the sql2016 instance (by putting database into single user mode, writing to garbage to its first non-iam page, and returning it to multi-user.)
   #>
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param (
-        [parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [parameter(Mandatory, ValueFromPipeline)]
         [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter]$SqlInstance,
         [parameter(Mandatory = $false)]
@@ -65,7 +63,8 @@ function Invoke-DbaDatabaseCorruption {
         [parameter(Mandatory)]
         [string]$Database,
         [string]$Table,
-        [switch][Alias('Silent')]$EnableException
+        [Alias('Silent')]
+        [switch]$EnableException
     )
     # For later if we want to do bit flipping.
     # function Dbcc-ReadPage {
@@ -120,10 +119,8 @@ function Invoke-DbaDatabaseCorruption {
     }
 
     try {
-        Write-Message -Level Verbose -Message "Connecting to $SqlInstance"
         $Server = Connect-SqlInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential -MinimumVersion 9
-    }
-    catch {
+    } catch {
         Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $SqlInstance
         return
     }
@@ -135,8 +132,7 @@ function Invoke-DbaDatabaseCorruption {
     }
     if ($Table) {
         $tb = $db.Tables | Where-Object Name -eq $Table
-    }
-    else {
+    } else {
         $tb = $db.Tables | Select-Object -First 1
     }
 
@@ -156,18 +152,17 @@ function Invoke-DbaDatabaseCorruption {
         #Dbcc-ReadPage -SqlInstance $Server -Database $Database -PageId $pages.PagePID -FileId $pages.PageFID
         Write-Message -Level Verbose -Message "Setting single-user mode."
         $null = Stop-DbaProcess -SqlInstance $Server -Database $Database
-        $null = Set-DbaDatabaseState -SqlServer $Server -Database $Database -SingleUser -Force
+        $null = Set-DbaDbState -SqlServer $Server -Database $Database -SingleUser -Force
 
         try {
             Write-Message -Level Verbose -Message "Stopping processes in target database."
             $null = Stop-DbaProcess -SqlInstance $Server -Database $Database
             Write-Message -Level Verbose -Message "Corrupting data."
             Dbcc-WritePage -SqlInstance $Server -Database $Database -PageId $pages.PagePID -FileId $pages.PageFID
-        }
-        catch {
+        } catch {
             $Server.ConnectionContext.Disconnect()
             $Server.ConnectionContext.Connect()
-            $null = Set-DbaDatabaseState -SqlServer $Server -Database $Database -MultiUser -Force
+            $null = Set-DbaDbState -SqlServer $Server -Database $Database -MultiUser -Force
             Stop-Function -Message "Failed to write page" -Category WriteError -ErrorRecord $_ -Target $instance
             return
         }
@@ -176,10 +171,10 @@ function Invoke-DbaDatabaseCorruption {
         # If you do not disconnect and reconnect, multiuser fails.
         $Server.ConnectionContext.Disconnect()
         $Server.ConnectionContext.Connect()
-        $null = Set-DbaDatabaseState -SqlServer $Server -Database $Database -MultiUser -Force
+        $null = Set-DbaDbState -SqlServer $Server -Database $Database -MultiUser -Force
 
         [pscustomobject]@{
-            ComputerName = $Server.NetName
+            ComputerName = $Server.ComputerName
             InstanceName = $Server.ServiceName
             SqlInstance  = $Server.DomainInstanceName
             Database     = $db.Name
@@ -188,3 +183,5 @@ function Invoke-DbaDatabaseCorruption {
         }
     }
 }
+
+

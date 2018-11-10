@@ -1,77 +1,69 @@
 function Test-DbaJobOwner {
     <#
-        .SYNOPSIS
-            Checks SQL Agent Job owners against a login to validate which jobs do not match that owner.
+    .SYNOPSIS
+        Checks SQL Agent Job owners against a login to validate which jobs do not match that owner.
 
-        .DESCRIPTION
-            This function checks all SQL Agent Jobs on an instance against a SQL login to validate if that login owns those SQL Agent Jobs or not.
+    .DESCRIPTION
+        This function checks all SQL Agent Jobs on an instance against a SQL login to validate if that login owns those SQL Agent Jobs or not. By default, the function checks against 'sa' for ownership, but the user can pass a specific login if they use something else.
 
-            By default, the function checks against 'sa' for ownership, but the user can pass a specific login if they use something else.
+        Only SQL Agent Jobs that do not match this ownership will be displayed.
+        Best practice reference: http://sqlmag.com/blog/sql-server-tip-assign-ownership-jobs-sysadmin-account
 
-            Only SQL Agent Jobs that do not match this ownership will be displayed.
+    .PARAMETER SqlInstance
+        The target SQL Server instance or instances.
 
-            Best practice reference: http://sqlmag.com/blog/sql-server-tip-assign-ownership-jobs-sysadmin-account
+    .PARAMETER SqlCredential
+        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
 
-        .PARAMETER SqlInstance
-            Specifies the SQL Server instance(s) to scan.
+    .PARAMETER Job
+        Specifies the job(s) to process. Options for this list are auto-populated from the server. If unspecified, all jobs will be processed.
 
-        .PARAMETER SqlCredential
-            Allows you to login to servers using SQL Logins instead of Windows Authentication (AKA Integrated or Trusted). To use:
+    .PARAMETER ExcludeJob
+        Specifies the job(s) to exclude from processing. Options for this list are auto-populated from the server.
 
-            $scred = Get-Credential, then pass $scred object to the -SqlCredential parameter.
+    .PARAMETER Login
+        Specifies the login that you wish check for ownership. This defaults to 'sa' or the sysadmin name if sa was renamed. This must be a valid security principal which exists on the target server.
 
-            Windows Authentication will be used if SqlCredential is not specified. SQL Server does not accept Windows credentials being passed as credentials.
+    .PARAMETER Detailed
+        Output all properties, will be deprecated in 1.0.0 release.
 
-            To connect as a different Windows user, run PowerShell as that user.
+    .PARAMETER EnableException
+        By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
+        This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
+        Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
 
-        .PARAMETER Job
-            Specifies the job(s) to process. Options for this list are auto-populated from the server. If unspecified, all jobs will be processed.
+    .NOTES
+        Tags: Agent, Job, Owner
+        Author: Michael Fal (@Mike_Fal), http://mikefal.net
 
-        .PARAMETER ExcludeJob
-            Specifies the job(s) to exclude from processing. Options for this list are auto-populated from the server.
+        Website: https://dbatools.io
+        Copyright: (c) 2018 by dbatools, licensed under MIT
+        License: MIT https://opensource.org/licenses/MIT
 
-        .PARAMETER Login
-            Specifies the login that you wish check for ownership. This defaults to 'sa' or the sysadmin name if sa was renamed. This must be a valid security principal which exists on the target server.
+    .LINK
+        https://dbatools.io/Test-DbaJobOwner
 
-        .PARAMETER Detailed
-            Output all properties, will be deprecated in 1.0.0 release.
+    .EXAMPLE
+        PS C:\> Test-DbaJobOwner -SqlInstance localhost
 
-        .PARAMETER EnableException
-            By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
-            This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
-            Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
+        Returns all SQL Agent Jobs where the owner does not match 'sa'.
 
-        .NOTES
-            Tags: Agent, Job, Owner
-            Author: Michael Fal (@Mike_Fal), http://mikefal.net
+    .EXAMPLE
+        PS C:\> Test-DbaJobOwner -SqlInstance localhost -ExcludeJob 'syspolicy_purge_history'
 
-            Website: https://dbatools.io
-            Copyright: (C) Chrissy LeMaire, clemaire@gmail.com
-            License: GNU GPL v3 https://opensource.org/licenses/GPL-3.0
+        Returns SQL Agent Jobs except for the syspolicy_purge_history job
 
-        .LINK
-            https://dbatools.io/Test-DbaJobOwner
+    .EXAMPLE
+        PS C:\> Test-DbaJobOwner -SqlInstance localhost -Login DOMAIN\account
 
-        .EXAMPLE
-            Test-DbaJobOwner -SqlInstance localhost
+        Returns all SQL Agent Jobs where the owner does not match DOMAIN\account. Note
+        that Login must be a valid security principal that exists on the target server.
 
-            Returns all SQL Agent Jobs where the owner does not match 'sa'.
-
-        .EXAMPLE
-            Test-DbaJobOwner -SqlInstance localhost -ExcludeJob 'syspolicy_purge_history'
-
-            Returns SQL Agent Jobs except for the syspolicy_purge_history job
-
-        .EXAMPLE
-            Test-DbaJobOwner -SqlInstance localhost -Login DOMAIN\account
-
-            Returns all SQL Agent Jobs where the owner does not match DOMAIN\account. Note
-            that Login must be a valid security principal that exists on the target server.
-    #>
+#>
     [CmdletBinding()]
     [OutputType('System.Object[]')]
     param (
-        [parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [parameter(Mandatory, ValueFromPipeline)]
         [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter[]]$SqlInstance,
         [PSCredential]$SqlCredential,
@@ -81,7 +73,8 @@ function Test-DbaJobOwner {
         [Alias("TargetLogin")]
         [string]$Login,
         [switch]$Detailed,
-        [switch][Alias('Silent')]$EnableException
+        [Alias('Silent')]
+        [switch]$EnableException
     )
 
     begin {
@@ -90,19 +83,17 @@ function Test-DbaJobOwner {
         $return = @()
     }
     process {
-        foreach ($servername in $SqlInstance) {
+        foreach ($instance in $SqlInstance) {
             #connect to the instance
-            Write-Message -Level Verbose -Message "Connecting to $servername."
-            $server = Connect-SqlInstance $servername -SqlCredential $SqlCredential
+            $server = Connect-SqlInstance $instance -SqlCredential $SqlCredential
 
             #Validate login
             if ($Login -and ($server.Logins.Name) -notcontains $Login) {
                 if ($SqlInstance.count -eq 1) {
                     Stop-Function -Message "Invalid login: $Login."
                     return
-                }
-                else {
-                    Write-Message -Level Warning -Message "$Login is not a valid login on $servername. Moving on."
+                } else {
+                    Write-Message -Level Warning -Message "$Login is not a valid login on $instance. Moving on."
                     continue
                 }
             }
@@ -112,7 +103,7 @@ function Test-DbaJobOwner {
             }
 
             #Sets the Default Login to sa if the Login Paramater is not set.
-            if(!($PSBoundParameters.ContainsKey('Login'))){
+            if (!($PSBoundParameters.ContainsKey('Login'))) {
                 $Login = "sa"
             }
             #sql2000 id property is empty -force target login to 'sa' login
@@ -129,11 +120,9 @@ function Test-DbaJobOwner {
             Write-Message -Level Verbose -Message "Gathering jobs to check."
             if ($Job) {
                 $jobCollection = $server.JobServer.Jobs | Where-Object { $Job -contains $_.Name }
-            }
-            elseif ($ExcludeJob) {
+            } elseif ($ExcludeJob) {
                 $jobCollection = $server.JobServer.Jobs | Where-Object { $ExcludeJob -notcontains $_.Name }
-            }
-            else {
+            } else {
                 $jobCollection = $server.JobServer.Jobs
             }
 
@@ -143,25 +132,26 @@ function Test-DbaJobOwner {
                 $row = [ordered]@{
                     Server       = $server.Name
                     Job          = $j.Name
+                    JobType      = if ($j.CategoryID -eq 1) { "Remote" } else { $j.JobType }
                     CurrentOwner = $j.OwnerLoginName
                     TargetOwner  = $Login
-                    OwnerMatch   = ($j.OwnerLoginName -eq $Login)
+                    OwnerMatch   = if ($j.CategoryID -eq 1) { $true } else { $j.OwnerLoginName -eq $Login }
 
                 }
                 #add each custom object to the return array
                 $return += New-Object PSObject -Property $row
             }
-            if($Job){
+            if ($Job) {
                 $results = $return
-            }
-            else{
+            } else {
                 $results = $return | Where-Object {$_.OwnerMatch -eq $False}
             }
         }
     }
     end {
         #return results
-            Select-DefaultView -InputObject $results -Property Server,Job,CurrentOwner,TargetOwner,OwnerMatch
+        Select-DefaultView -InputObject $results -Property Server, Job, JobType, CurrentOwner, TargetOwner, OwnerMatch
     }
 
 }
+

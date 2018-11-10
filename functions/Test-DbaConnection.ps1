@@ -2,62 +2,64 @@
 
 function Test-DbaConnection {
     <#
-        .SYNOPSIS
-            Tests the connection to a single instance.
+    .SYNOPSIS
+        Tests the connection to a single instance.
 
-        .DESCRIPTION
-            Tests the ability to connect to an SQL Server instance outputting information about the server and instance.
+    .DESCRIPTION
+        Tests the ability to connect to an SQL Server instance outputting information about the server and instance.
 
-        .PARAMETER SqlInstance
-            The SQL Server Instance to test connection
+    .PARAMETER SqlInstance
+        The SQL Server Instance to test connection
 
-        .PARAMETER Credential
-            Credential object used to connect to the Computer as a different user
+    .PARAMETER Credential
+        Credential object used to connect to the Computer as a different user
 
-        .PARAMETER SqlCredential
-            Allows you to login to servers using SQL Logins as opposed to Windows Auth/Integrated/Trusted. To use:
+    .PARAMETER SqlCredential
+        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
 
-            $scred = Get-Credential, then pass $scred object to the -SqlCredential parameter.
+    .PARAMETER EnableException
+        By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
+        This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
+        Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
 
-            Windows Authentication will be used if SqlCredential is not specified. SQL Server does not accept Windows credentials being passed as credentials. To connect as a different Windows user, run PowerShell as that user.
+    .NOTES
+        Tags: CIM, Test, Connection
+        Author: Chrissy LeMaire (@cl), netnerds.net
 
-        .PARAMETER EnableException
-            By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
-            This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
-            Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
+        Website: https://dbatools.io
+        Copyright: (c) 2018 by dbatools, licensed under MIT
+        License: MIT https://opensource.org/licenses/MIT
 
-        .EXAMPLE
-            Test-DbaConnection SQL2016
+    .LINK
+        https://dbatools.io/Test-DbaConnection
 
-            ComputerName         : SQL2016
-            InstanceName         : MSSQLSERVER
-            SqlInstance          : sql2016
-            SqlVersion           : 13.0.4001
-            ConnectingAsUser     : BASE\ctrlb
-            ConnectSuccess       : True
-            AuthType             : Windows Authentication
-            AuthScheme           : KERBEROS
-            TcpPort              : 1433
-            IPAddress            : 10.2.1.5
-            NetBiosName          : sql2016.base.local
-            IsPingable           : True
-            PSRemotingAccessible : True
-            DomainName           : base.local
-            LocalWindows         : 10.0.15063.0
-            LocalPowerShell      : 5.1.15063.502
-            LocalCLR             : 4.0.30319.42000
-            LocalSMOVersion      : 13.0.0.0
-            LocalDomainUser      : True
-            LocalRunAsAdmin      : False
+    .EXAMPLE
+        PS C:\> Test-DbaConnection SQL2016
+        ```
+        ComputerName         : SQL2016
+        InstanceName         : MSSQLSERVER
+        SqlInstance          : sql2016
+        SqlVersion           : 13.0.4001
+        ConnectingAsUser     : BASE\ctrlb
+        ConnectSuccess       : True
+        AuthType             : Windows Authentication
+        AuthScheme           : KERBEROS
+        TcpPort              : 1433
+        IPAddress            : 10.2.1.5
+        NetBiosName          : sql2016.base.local
+        IsPingable           : True
+        PSRemotingAccessible : True
+        DomainName           : base.local
+        LocalWindows         : 10.0.15063.0
+        LocalPowerShell      : 5.1.15063.502
+        LocalCLR             : 4.0.30319.42000
+        LocalSMOVersion      : 13.0.0.0
+        LocalDomainUser      : True
+        LocalRunAsAdmin      : False
+        ```
 
-        .NOTES
-            Tags: CIM, Test, Connection
-            Author: Chrissy LeMaire
-
-            Website: https://dbatools.io
-            Copyright: (C) Chrissy LeMaire, clemaire@gmail.com
-            License: GNU GPL v3 https://opensource.org/licenses/GPL-3.0
-    #>
+        Test connection to SQL2016 and outputs information collected
+#>
     [CmdletBinding()]
     param (
         [parameter(ValueFromPipeline)]
@@ -65,7 +67,8 @@ function Test-DbaConnection {
         [DbaInstance[]]$SqlInstance,
         [PSCredential]$Credential,
         [PSCredential]$SqlCredential,
-        [switch][Alias('Silent')]$EnableException
+        [Alias('Silent')]
+        [switch]$EnableException
     )
     process {
         foreach ($instance in $SqlInstance) {
@@ -94,8 +97,7 @@ function Test-DbaConnection {
                         FullComputerName :
                      #>
                 $resolved = Resolve-DbaNetworkName -ComputerName $instance.ComputerName -Credential $Credential
-            }
-            catch {
+            } catch {
                 Stop-Function -Message "Unable to resolve server information" -Category ConnectionError -Target $instance -ErrorRecord $_ -Continue
             }
 
@@ -104,8 +106,7 @@ function Test-DbaConnection {
             try {
                 $null = Invoke-Command2 -ComputerName $instance.ComputerName -Credential $Credential -ScriptBlock { Get-ChildItem } -ErrorAction Stop
                 $remoting = $true
-            }
-            catch {
+            } catch {
                 $remoting = $_
             }
 
@@ -115,27 +116,25 @@ function Test-DbaConnection {
 
             # SQL Server connection
             if ($instance.InstanceName -ne "MSSQLSERVER") {
-                $sqlport = "N/A"
-            }
-            else {
+                #Variable marked as unused by PSScriptAnalyzer, need to be in PSCustomObject?
+                #$sqlport = "N/A"
+            } else {
                 Write-Message -Level Verbose -Message "Testing raw socket connection to default SQL port"
                 $tcp = New-Object System.Net.Sockets.TcpClient
                 try {
                     $tcp.Connect($baseaddress, 1433)
                     $tcp.Close()
                     $tcp.Dispose()
-                    $sqlport = $true
-                }
-                catch {
-                    $sqlport = $false
+                } catch {
+                    # here to avoid an empty catch
+                    $null = 1
                 }
             }
 
             try {
                 $server = Connect-SqlInstance -SqlInstance $instance.FullSmoName -SqlCredential $SqlCredential
                 $connectSuccess = $true
-            }
-            catch {
+            } catch {
                 $connectSuccess = $false
                 Stop-Function -Message "Issue connection to SQL Server on $instance" -Category ConnectionError -Target $instance -ErrorRecord $_ -Continue
             }
@@ -143,24 +142,21 @@ function Test-DbaConnection {
             $username = $server.ConnectionContext.TrueLogin
             if ($username -like "*\*") {
                 $authType = "Windows Authentication"
-            }
-            else {
+            } else {
                 $authType = "SQL Authentication"
             }
 
             # TCP Port
             try {
                 $tcpport = (Get-DbaTcpPort -SqlInstance $server -EnableException).Port
-            }
-            catch {
+            } catch {
                 $tcpport = $_
             }
 
             # Auth Scheme
             try {
                 $authscheme = (Test-DbaConnectionAuthScheme -SqlInstance $server -WarningVariable authwarning -WarningAction SilentlyContinue).AuthScheme
-            }
-            catch {
+            } catch {
                 $authscheme = $_
             }
 
@@ -196,3 +192,4 @@ function Test-DbaConnection {
         Test-DbaDeprecation -DeprecatedOn "1.0.0" -EnableException:$false -Alias Test-SqlConnection
     }
 }
+

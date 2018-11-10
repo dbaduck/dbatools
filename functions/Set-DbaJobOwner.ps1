@@ -1,80 +1,75 @@
 function Set-DbaJobOwner {
     <#
-        .SYNOPSIS
-            Sets SQL Agent job owners with a desired login if jobs do not match that owner.
+    .SYNOPSIS
+        Sets SQL Agent job owners with a desired login if jobs do not match that owner.
 
-        .DESCRIPTION
-            This function alters SQL Agent Job ownership to match a specified login if their current owner does not match the target login. By default, the target login will be 'sa', but the the user may specify a different login for ownership. This be applied to all jobs or only to a select collection of jobs.
+    .DESCRIPTION
+        This function alters SQL Agent Job ownership to match a specified login if their current owner does not match the target login. By default, the target login will be 'sa', but the the user may specify a different login for ownership. This be applied to all jobs or only to a select collection of jobs.
 
-            Best practice reference: http://sqlmag.com/blog/sql-server-tip-assign-ownership-jobs-sysadmin-account
+        Best practice reference: http://sqlmag.com/blog/sql-server-tip-assign-ownership-jobs-sysadmin-account
 
-        .NOTES
-            Tags: Agent, Job
-            Author: Michael Fal (@Mike_Fal), http://mikefal.net
+    .PARAMETER SqlInstance
+        The target SQL Server instance or instances.
 
-            Website: https://dbatools.io
-            Copyright: (C) Chrissy LeMaire, clemaire@gmail.com
-            License: GNU GPL v3 https://opensource.org/licenses/GPL-3.0
+    .PARAMETER SqlCredential
+        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
 
-        .PARAMETER SqlInstance
-            Specifies the SQL Server instance(s) to scan.
+    .PARAMETER Job
+        Specifies the job(s) to process. Options for this list are auto-populated from the server. If unspecified, all jobs will be processed.
 
-        .PARAMETER SqlCredential
-            Allows you to login to servers using SQL Logins instead of Windows Authentication (AKA Integrated or Trusted). To use:
+    .PARAMETER ExcludeJob
+        Specifies the job(s) to exclude from processing. Options for this list are auto-populated from the server.
 
-            $scred = Get-Credential, then pass $scred object to the -SqlCredential parameter.
+    .PARAMETER Login
+        Specifies the login that you wish check for ownership. This defaults to 'sa' or the sysadmin name if sa was renamed. This must be a valid security principal which exists on the target server.
 
-            Windows Authentication will be used if SqlCredential is not specified. SQL Server does not accept Windows credentials being passed as credentials.
+    .PARAMETER WhatIf
+        If this switch is enabled, no actions are performed but informational messages will be displayed that explain what would happen if the command were to run.
 
-            To connect as a different Windows user, run PowerShell as that user.
+    .PARAMETER Confirm
+        If this switch is enabled, you will be prompted for confirmation before executing any operations that change state.
 
-        .PARAMETER Job
-            Specifies the job(s) to process. Options for this list are auto-populated from the server. If unspecified, all jobs will be processed.
+    .PARAMETER EnableException
+        By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
+        This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
+        Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
 
-        .PARAMETER ExcludeJob
-            Specifies the job(s) to exclude from processing. Options for this list are auto-populated from the server.
+    .NOTES
+        Tags: Agent, Job
+        Author: Michael Fal (@Mike_Fal), http://mikefal.net
 
-        .PARAMETER Login
-            Specifies the login that you wish check for ownership. This defaults to 'sa' or the sysadmin name if sa was renamed. This must be a valid security principal which exists on the target server.
+        Website: https://dbatools.io
+        Copyright: (c) 2018 by dbatools, licensed under MIT
+        License: MIT https://opensource.org/licenses/MIT
 
-        .PARAMETER WhatIf
-            If this switch is enabled, no actions are performed but informational messages will be displayed that explain what would happen if the command were to run.
+    .LINK
+        https://dbatools.io/Set-DbaJobOwner
 
-        .PARAMETER Confirm
-            If this switch is enabled, you will be prompted for confirmation before executing any operations that change state.
+    .EXAMPLE
+        PS C:\> Set-DbaJobOwner -SqlInstance localhost
 
-        .PARAMETER EnableException
-            By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
-            This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
-            Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
+        Sets SQL Agent Job owner to sa on all jobs where the owner does not match sa.
 
-        .LINK
-            https://dbatools.io/Set-DbaJobOwner
+    .EXAMPLE
+        PS C:\> Set-DbaJobOwner -SqlInstance localhost -Login DOMAIN\account
 
-        .EXAMPLE
-            Set-DbaJobOwner -SqlInstance localhost
+        Sets SQL Agent Job owner to sa on all jobs where the owner does not match 'DOMAIN\account'. Note
+        that Login must be a valid security principal that exists on the target server.
 
-            Sets SQL Agent Job owner to sa on all jobs where the owner does not match sa.
+    .EXAMPLE
+        PS C:\> Set-DbaJobOwner -SqlInstance localhost -Job job1, job2
 
-        .EXAMPLE
-            Set-DbaJobOwner -SqlInstance localhost -Login DOMAIN\account
+        Sets SQL Agent Job owner to 'sa' on the job1 and job2 jobs if their current owner does not match 'sa'.
 
-            Sets SQL Agent Job owner to sa on all jobs where the owner does not match 'DOMAIN\account'. Note
-            that Login must be a valid security principal that exists on the target server.
+    .EXAMPLE
+        PS C:\> 'sqlserver','sql2016' | Set-DbaJobOwner
 
-        .EXAMPLE
-            Set-DbaJobOwner -SqlInstance localhost -Job job1, job2
+        Sets SQL Agent Job owner to sa on all jobs where the owner does not match sa on both sqlserver and sql2016.
 
-            Sets SQL Agent Job owner to 'sa' on the job1 and job2 jobs if their current owner does not match 'sa'.
-
-        .EXAMPLE
-            'sqlserver','sql2016' | Set-DbaJobOwner
-
-            Sets SQL Agent Job owner to sa on all jobs where the owner does not match sa on both sqlserver and sql2016.
-    #>
+#>
     [CmdletBinding(SupportsShouldProcess = $true)]
     param (
-        [parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [parameter(Mandatory, ValueFromPipeline)]
         [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter[]]$SqlInstance,
         [PSCredential]$SqlCredential,
@@ -83,14 +78,14 @@ function Set-DbaJobOwner {
         [object[]]$ExcludeJob,
         [Alias("TargetLogin")]
         [string]$Login,
-        [switch][Alias('Silent')]$EnableException
+        [Alias('Silent')]
+        [switch]$EnableException
     )
 
     process {
-        foreach ($servername in $SqlInstance) {
+        foreach ($instance in $SqlInstance) {
             #connect to the instance
-            Write-Message -Level Verbose -Message "Connecting to $servername."
-            $server = Connect-SqlInstance $servername -SqlCredential $SqlCredential
+            $server = Connect-SqlInstance $instance -SqlCredential $SqlCredential
 
             # dynamic sa name for orgs who have changed their sa name
             if (!$Login) {
@@ -101,9 +96,8 @@ function Set-DbaJobOwner {
             if (($server.Logins.Name) -notcontains $Login) {
                 if ($SqlInstance.count -eq 1) {
                     throw -Message "Invalid login: $Login."
-                }
-                else {
-                    Write-Message -Level Warning -Message "$Login is not a valid login on $servername. Moving on."
+                } else {
+                    Write-Message -Level Warning -Message "$Login is not a valid login on $instance. Moving on."
                     Continue
                 }
             }
@@ -118,8 +112,7 @@ function Set-DbaJobOwner {
 
             if ($Job) {
                 $jobcollection = $server.JobServer.Jobs | Where-Object { $_.OwnerLoginName -ne $Login -and $Job -contains $_.Name }
-            }
-            else {
+            } else {
                 $jobcollection = $server.JobServer.Jobs | Where-Object { $_.OwnerLoginName -ne $Login }
             }
 
@@ -131,15 +124,13 @@ function Set-DbaJobOwner {
             foreach ($j in $jobcollection) {
                 $jobname = $j.name
 
-                if ($PSCmdlet.ShouldProcess($servername, "Setting job owner for $jobname to $Login")) {
+                if ($PSCmdlet.ShouldProcess($instance, "Setting job owner for $jobname to $Login")) {
                     try {
-                        Write-Message -Level Verbose -Message "Setting job owner for $jobname to $Login on $servername."
+                        Write-Message -Level Verbose -Message "Setting job owner for $jobname to $Login on $instance."
                         #Set job owner to $TargetLogin (default 'sa')
                         $j.OwnerLoginName = $Login
                         $j.Alter()
-                    }
-                    catch {
-                        # write-exception writes the full exception to file
+                    } catch {
                         Stop-Function -Message "Issue setting job owner on $jobName." -Target $jobName -InnerErrorRecord $_ -Category InvalidOperation
                     }
                 }
@@ -147,3 +138,4 @@ function Set-DbaJobOwner {
         }
     }
 }
+

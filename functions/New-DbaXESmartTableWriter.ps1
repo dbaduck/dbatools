@@ -1,80 +1,83 @@
-﻿function New-DbaXESmartTableWriter {
+#ValidationTags#Messaging,FlowControl,Pipeline,CodeStyle#
+function New-DbaXESmartTableWriter {
     <#
-        .SYNOPSIS
-            This Response type is used to write Extended Events to a database table.
+    .SYNOPSIS
+        This response type is used to write Extended Events to a database table.
 
-        .DESCRIPTION
-            This Response type is used to write Extended Events to a database table. The events are temporarily stored in memory before being written to the database at regular intervals.
+    .DESCRIPTION
+        This response type is used to write Extended Events to a database table. The events are temporarily stored in memory before being written to the database at regular intervals.
 
-            The target table can be created manually upfront or you can let the TableAppenderResponse create a target table based on the fields and actions available in the events captured.
+        The target table can be created manually upfront or you can let the TableAppenderResponse create a target table based on the fields and actions available in the events captured.
 
-            The columns of the target table and the fields/actions of the events are mapped by name (case-sensitive).
+        The columns of the target table and the fields/actions of the events are mapped by name (case-sensitive).
 
-       .PARAMETER SqlInstance
-            Target SQL Server. You must have sysadmin access and server version must be SQL Server version 2008 or higher.
+    .PARAMETER SqlInstance
+        The target SQL Server instance or instances. You must have sysadmin access and server version must be SQL Server version 2008 or higher.
 
-        .PARAMETER SqlCredential
-            Allows you to login to servers using SQL Logins instead of Windows Authentication (AKA Integrated or Trusted). To use:
+    .PARAMETER SqlCredential
+        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
 
-            $scred = Get-Credential, then pass $scred object to the -SqlCredential parameter.
+    .PARAMETER Database
+        Specifies the name of the database that contains the target table.
 
-            Windows Authentication will be used if SqlCredential is not specified. SQL Server does not accept Windows credentials being passed as credentials.
+    .PARAMETER Table
+        Specifies the name of the target table.
 
-            To connect as a different Windows user, run PowerShell as that user.
+    .PARAMETER AutoCreateTargetTable
+        If this switch is enabled, XESmartTarget will infer the definition of the target table from the columns captured in the Extended Events session.
 
-        .PARAMETER Database
-            Specifies the name of the database that contains the target table.
+        If the target table already exists, it will not be recreated.
 
-        .PARAMETER Table
-            Specifies the name of the target table.
+    .PARAMETER UploadIntervalSeconds
+        Specifies the number of seconds XESmartTarget will keep the events in memory before dumping them to the target table. The default is 10 seconds.
 
-        .PARAMETER AutoCreateTargetTable
-            If this switch is enabled, XESmartTarget will infer the definition of the target table from the columns captured in the Extended Events session.
+    .PARAMETER OutputColumn
+        Specifies the list of columns to output from the events. XESmartTarget will capture in memory and write to the target table only the columns (fields or targets) that are present in this list.
 
-            If the target table already exists, it will not be recreated.
+        Fields and actions are matched in a case-sensitive manner.
 
-        .PARAMETER UploadIntervalSeconds
-            Specifies the number of seconds XESmartTarget will keep the events in memory before dumping them to the target table. The default is 10 seconds.
+        Expression columns are supported. Specify a column with ColumnName AS Expression to add an expression column (Example: Total AS Reads + Writes)
 
-        .PARAMETER OutputColumn
-            Specifies the list of columns to output from the events. XESmartTarget will capture in memory and write to the target table only the columns (fields or targets) that are present in this list.
+    .PARAMETER Event
+        Specifies a list of events to be processed (with others being ignored. By default, all events are processed.
 
-            Fields and actions are matched in a case-sensitive manner.
+    .PARAMETER Filter
+        Specifies a filter expression in the same form as you would use in the WHERE clause of a SQL query.
 
-            Expression columns are supported. Specify a column with ColumnName AS Expression to add an expression column (Example: Total AS Reads + Writes)
+        Example: duration > 10000 AND cpu_time > 10000
 
-        .PARAMETER Event
-            Specifies a list of events to be processed (with others being ignored. By default, all events are processed.
+    .PARAMETER WhatIf
+        If this switch is enabled, no actions are performed but informational messages will be displayed that explain what would happen if the command were to run.
 
-        .PARAMETER Filter
-            Specifies a filter expression in the same form as you would use in the WHERE clause of a SQL query.
+    .PARAMETER Confirm
+        If this switch is enabled, you will be prompted for confirmation before executing any operations that change state.
 
-            Example: duration > 10000 AND cpu_time > 10000
+    .PARAMETER EnableException
+        By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
+        This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
+        Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
 
-        .PARAMETER EnableException
-            By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
-            This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
-            Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
+    .NOTES
+        Tags: ExtendedEvent, XE, XEvent
+        Author: Chrissy LeMaire (@cl) | SmartTarget by Gianluca Sartori (@spaghettidba)
 
-        .NOTES
-            Tags: ExtendedEvent, XE, Xevent
-            Website: https://dbatools.io
-            Copyright: (C) Chrissy LeMaire, clemaire@gmail.com
-            License: GNU GPL v3 https://opensource.org/licenses/GPL-3.0
-            SmartTarget: by Gianluca Sartori (@spaghettidba)
+        Website: https://dbatools.io
+        Copyright: (c) 2018 by dbatools, licensed under MIT
+        License: MIT https://opensource.org/licenses/MIT
+        SmartTarget: by Gianluca Sartori (@spaghettidba)
 
-        .LINK
-            https://dbatools.io/New-DbaXESmartTableWriter
-            https://github.com/spaghettidba/XESmartTarget/wiki
+    .LINK
+        https://dbatools.io/New-DbaXESmartTableWriter
 
-        .EXAMPLE
-            $columns = "cpu_time", "duration", "physical_reads", "logical_reads", "writes", "row_count", "batch_text"
-            $response = New-DbaXESmartTableWriter -SqlInstance sql2017 -Database dbadb -Table deadlocktracker -OutputColumns $columns -Filter "duration > 10000"
-            Start-DbaXESmartTarget -SqlInstance sql2017 -Session deadlock_tracker -Responder $response
-            
-            Writes Extended Events to the deadlocktracker table in dbadb on sql2017.
-    #>
-    [CmdletBinding()]
+    .EXAMPLE
+        PS C:\> $columns = "cpu_time", "duration", "physical_reads", "logical_reads", "writes", "row_count", "batch_text"
+        PS C:\> $response = New-DbaXESmartTableWriter -SqlInstance sql2017 -Database dbadb -Table deadlocktracker -OutputColumn $columns -Filter "duration > 10000"
+        PS C:\> Start-DbaXESmartTarget -SqlInstance sql2017 -Session deadlock_tracker -Responder $response
+
+        Writes Extended Events to the deadlocktracker table in dbadb on sql2017.
+
+#>
+    [CmdletBinding(SupportsShouldProcess)]
     param (
         [parameter(Mandatory, ValueFromPipeline)]
         [Alias("ServerInstance", "SqlServer")]
@@ -94,8 +97,7 @@
     begin {
         try {
             Add-Type -Path "$script:PSModuleRoot\bin\XESmartTarget\XESmartTarget.Core.dll" -ErrorAction Stop
-        }
-        catch {
+        } catch {
             Stop-Function -Message "Could not load XESmartTarget.Core.dll" -ErrorRecord $_ -Target "XESmartTarget"
             return
         }
@@ -105,34 +107,33 @@
 
         foreach ($instance in $SqlInstance) {
             try {
-                Write-Message -Level Verbose -Message "Connecting to $instance."
                 $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 11
-            }
-            catch {
+            } catch {
                 Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
-
-            try {
-                $writer = New-Object -TypeName XESmartTarget.Core.Responses.TableAppenderResponse
-                $writer.ServerName = $server.Name
-                $writer.DatabaseName = $Database
-                $writer.TableName = $Table
-                $writer.AutoCreateTargetTable = $AutoCreateTargetTable
-                $writer.UploadIntervalSeconds = $UploadIntervalSeconds
-                if (Test-Bound -ParameterName "Event") {
-                    $writer.Events = $Event
+            if ($Pscmdlet.ShouldProcess($instance, "Creating new XESmartTableWriter")) {
+                try {
+                    $writer = New-Object -TypeName XESmartTarget.Core.Responses.TableAppenderResponse
+                    $writer.ServerName = $server.Name
+                    $writer.DatabaseName = $Database
+                    $writer.TableName = $Table
+                    $writer.AutoCreateTargetTable = $AutoCreateTargetTable
+                    $writer.UploadIntervalSeconds = $UploadIntervalSeconds
+                    if (Test-Bound -ParameterName "Event") {
+                        $writer.Events = $Event
+                    }
+                    if (Test-Bound -ParameterName "OutputColumn") {
+                        $writer.OutputColumns = $OutputColumn
+                    }
+                    if (Test-Bound -ParameterName "Filter") {
+                        $writer.Filter = $Filter
+                    }
+                    $writer
+                } catch {
+                    Stop-Function -Message "Failure" -ErrorRecord $_ -Target "XESmartTarget" -Continue
                 }
-                if (Test-Bound -ParameterName "OutputColumn") {
-                    $writer.OutputColumns = $OutputColumn
-                }
-                if (Test-Bound -ParameterName "Filter") {
-                    $writer.Filter = $Filter
-                }
-                $writer
-            }
-            catch {
-                Stop-Function -Message "Failure" -ErrorRecord $_ -Target "XESmartTarget" -Continue
             }
         }
     }
 }
+

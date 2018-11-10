@@ -1,57 +1,54 @@
-﻿function Get-DbaXEObject {
+#ValidationTags#Messaging,FlowControl,Pipeline,CodeStyle#
+function Get-DbaXEObject {
     <#
-        .SYNOPSIS
-            Gets a list of trace(s) from specified SQL Server instance(s).
+    .SYNOPSIS
+        Gets a list of extended events objects exposed by event packages from specified SQL Server instance(s).
 
-        .DESCRIPTION
-            This function returns a list of Traces on the specified SQL Server instance(s) and identifies the default Trace File
+    .DESCRIPTION
+        This function returns a list of extended events objects exposed by event packages from specified SQL Server instance(s).
 
-        .PARAMETER SqlInstance
-            Target SQL Server. You must have sysadmin access and server version must be SQL Server version 2008 or higher.
+    .PARAMETER SqlInstance
+        The target SQL Server instance or instances. You must have sysadmin access and server version must be SQL Server version 2008 or higher.
 
-        .PARAMETER SqlCredential
-            Allows you to login to servers using SQL Logins instead of Windows Authentication (AKA Integrated or Trusted). To use:
+    .PARAMETER SqlCredential
+        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
 
-            $scred = Get-Credential, then pass $scred object to the -SqlCredential parameter.
+    .PARAMETER Type
+        Used to specify the type. Valid types include:
 
-            Windows Authentication will be used if SqlCredential is not specified. SQL Server does not accept Windows credentials being passed as credentials.
+        Action
+        Event
+        Map
+        Message
+        PredicateComparator
+        PredicateSource
+        Target
+        Type
 
-            To connect as a different Windows user, run PowerShell as that user.
+    .PARAMETER EnableException
+        By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message. This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting. Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
 
-        .PARAMETER Type
-            Used to specify the type. Valid types include:
+    .NOTES
+        Tags: ExtendedEvent, XE, XEvent
+        Author: Chrissy LeMaire (@cl), netnerds.net
 
-                Action
-                Event
-                Map
-                Message
-                PredicateComparator
-                PredicateSource
-                Target
-                Type
+        Website: https://dbatools.io
+        Copyright: (c) 2018 by dbatools, licensed under MIT
+        License: MIT https://opensource.org/licenses/MIT
 
-        .PARAMETER EnableException
-            By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message. This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting. Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
+    .EXAMPLE
+        PS C:\> Get-DbaXEObject -SqlInstance sql2016
 
-        .NOTES
-            Tags: ExtendedEvent, XE, Xevent
-            Website: https://dbatools.io
-            Copyright: (C) Chrissy LeMaire, clemaire@gmail.com
-            License: GNU GPL v3 https://opensource.org/licenses/GPL-3.0
+        Lists all the XE Objects on the sql2016 SQL Server.
 
-        .EXAMPLE
-            Get-DbaXEObject -SqlInstance sql2016
+    .EXAMPLE
+        PS C:\> Get-DbaXEObject -SqlInstance sql2017 -Type Action, Event
 
-            Lists all the XE Objects on the sql2016 SQL Server.
+        Lists all the XE Objects of type Action and Event on the sql2017 SQL Server.
 
-        .EXAMPLE
-            Get-DbaXEObject -SqlInstance sql2017 -Type Action, Event
-
-            Lists all the XE Objects of type Action and Event on the sql2017 SQL Server.
-
-    #>
+#>
     [CmdletBinding()]
-    Param (
+    param (
         [parameter(Position = 0, Mandatory, ValueFromPipeline)]
         [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter[]]$SqlInstance,
@@ -99,18 +96,18 @@
 
             try {
                 $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 9
-            }
-            catch {
+            } catch {
                 Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
                 return
             }
 
             try {
                 $server.Query($sql) | Select-DefaultView -ExcludeProperty ComputerName, InstanceName, ObjectTypeRaw
-            }
-            catch {
+            } catch {
                 Stop-Function -Message "Issue collecting trace data on $server." -Target $server -ErrorRecord $_
             }
         }
     }
 }
+
+

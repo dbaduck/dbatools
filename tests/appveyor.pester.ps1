@@ -55,6 +55,18 @@ Import-Module "$ModuleBase\dbatools.psd1"
 Update-TypeData -AppendPath "$ModuleBase\xml\dbatools.types.ps1xml"
 Start-Sleep 5
 
+function Split-ArrayInParts($array, [int]$parts) {
+    #splits an array in "equal" parts
+    $size = $array.Length / $parts
+    $counter = [pscustomobject] @{ Value = 0 }
+    $groups = $array | Group-Object -Property { [math]::Floor($counter.Value++ / $size) }
+    $rtn = @()
+    foreach($g in $groups) {
+        $rtn += , @($g.Group)
+    }
+    $rtn
+}
+
 function Get-CoverageIndications($Path, $ModuleBase) {
     # takes a test file path and figures out what to analyze for coverage (i.e. dependencies)
     $CBHRex = [regex]'(?smi)<#(.*)#>'
@@ -70,12 +82,15 @@ function Get-CoverageIndications($Path, $ModuleBase) {
         $f = $everything | Where-Object Name -eq $func_name
         $source = $f.Definition
         $CBH = $CBHRex.match($source).Value
-        $cmdonly = $source.Replace($CBH, '')
-        foreach ($e in $everyfunction) {
-            # hacky, I know, but every occurrence of any function plus a space kinda denotes usage !?
-            $searchme = "$e "
-            if ($cmdonly.contains($searchme)) {
-                $funcs += $e
+        # This fails very hard sometimes
+        if ($source -and $CBH) {
+            $cmdonly = $source.Replace($CBH, '')
+            foreach ($e in $everyfunction) {
+                # hacky, I know, but every occurrence of any function plus a space kinda denotes usage !?
+                $searchme = "$e "
+                if ($cmdonly.contains($searchme)) {
+                    $funcs += $e
+                }
             }
         }
     }
@@ -165,6 +180,69 @@ function Send-CodecovReport($CodecovReport) {
     Invoke-RestMethod -Uri $Request.Uri -Method Post -InFile $CodecovReport -ContentType 'multipart/form-data'
 }
 
+function Get-TestsForScenario {
+    param($Scenario, $AllTest)
+
+    # does this scenario run an 'autodetect' ?
+    if ($TestsRunGroups[$Scenario].StartsWith('autodetect_')[0]) {
+        # exclude any test specifically tied to a non-autodetect scenario
+        $TiedFunctions = ($TestsRunGroups.GetEnumerator() | Where-Object { $_.Value -notlike 'autodetect_*' }).Value
+        $RemainingTests = $AllTests | Where-Object { ($_.Name -replace '^([^.]+)(.+)?.Tests.ps1', '$1') -notin $TiedFunctions }
+        # and now scan for the instance string
+        $ScanFor = $TestsRunGroups[$Scenario].Replace('autodetect_', '')
+        #if ScanFor holds an array, search it in *and*
+        $ScanForAll = $ScanFor.Split(',')
+        # and exclude other instances in autodetect
+        $ExcludeScanForRaw = @() + ($TestsRunGroups.GetEnumerator() | Where-Object { ($_.Name -ne $Scenario) -and ($_.Value -like 'autodetect_*') }).Value.Replace('autodetect_', '')
+        $ScanTests = @()
+        foreach ($test in $RemainingTests) {
+            $testcontent = Get-Content $test -Raw
+            $IncludeFlag = 0
+            foreach ($piece in $ScanForAll) {
+                if ($testcontent -like "*$piece*") {
+                    $IncludeFlag += 1
+                }
+            }
+            if ($IncludeFlag -eq $ScanForAll.Length) {
+                #matched all pieces
+                $ExcludeAll = 0
+                foreach ($otherenv in $ExcludeScanForRaw) {
+                    $ExcludeFlag = 0
+                    $ExcludeScanForAll_ = $otherenv.split(',')
+                    #honor includes before excludes
+                    $ExcludeScanForAll = @()
+                    foreach ($piece in $ExcludeScanForAll_) {
+                        if ($piece -notin $ScanForAll) {
+                            $ExcludeScanForAll += $piece
+                        }
+                    }
+                    if ($ExcludeScanForAll.Length -eq 0) {
+                        $ExcludeAll = 0
+                        continue
+                    }
+                    foreach ($piece in $ExcludeScanForAll) {
+                        if ($testContent -like "*$piece*") {
+                            $ExcludeFlag += 1
+                        }
+                    }
+                    if ($ExcludeFlag -eq $ExcludeScanForAll.Length) {
+                        $ExcludeAll += 1
+                    }
+                }
+                if ($ExcludeAll -eq 0) {
+                    $ScanTests += $test
+                }
+            }
+        }
+        $AllScenarioTests = $ScanTests
+    }
+    else {
+        $AllScenarioTests = $AllTests | Where-Object { ($_.Name -replace '\.Tests\.ps1$', '') -in $TestsRunGroups[$Scenario] }
+    }
+    return $AllScenarioTests
+}
+
+
 if (-not $Finalize) {
     # Invoke pester.groups.ps1 to know which tests to run
     . "$ModuleBase\tests\pester.groups.ps1"
@@ -195,66 +273,33 @@ if (-not $Finalize) {
     if ($env:SCENARIO) {
         # if so, do we have a group with tests to run ?
         if ($env:SCENARIO -in $TestsRunGroups.Keys) {
-            # does this scenario run an 'autodetect' ?
-            if ($TestsRunGroups[$env:SCENARIO].StartsWith('autodetect_')[0]) {
-                # exclude any test specifically tied to a non-autodetect scenario
-                $TiedFunctions = ($TestsRunGroups.GetEnumerator() | Where-Object { $_.Value -notlike 'autodetect_*' }).Value
-                $RemainingTests = $AllTests | Where-Object { ($_.Name -replace '^([^.]+)(.+)?.Tests.ps1', '$1') -notin $TiedFunctions }
-                # and now scan for the instance string
-                $ScanFor = $TestsRunGroups[$env:SCENARIO].Replace('autodetect_', '')
-                # and exclude other instances in autodetect
-                $ExcludeScanFor = @() + ($TestsRunGroups.GetEnumerator() | Where-Object { ($_.Name -ne $env:SCENARIO) -and ($_.Value -like 'autodetect_*') }).Value.Replace('autodetect_', '')
-                $ScanTests = @()
-                foreach ($test in $RemainingTests) {
-                    $testcontent = Get-Content $test -Raw
-                    if ($testcontent -like "*$ScanFor*") {
-                        $ExcludeFlag = $false
-                        foreach ($exclude in $ExcludeScanFor) {
-                            if ($testcontent -like "*$exclude*") {
-                                $ExcludeFlag = $true
-                                break
-                            }
-                        }
-                        if (-not($ExcludeFlag)) {
-                            $ScanTests += $test
-                        }
-                    }
-                }
-                $AllScenarioTests = $ScanTests
-            }
-            else {
-                $AllScenarioTests = $AllTests | Where-Object { ($_.Name -replace '\.Tests\.ps1$', '') -in $TestsRunGroups[$env:SCENARIO] }
-            }
+            $AllScenarioTests = Get-TestsForScenario -scenario $env:SCENARIO -AllTest $AllTests
         }
         else {
-            $AllScenarioTests = $AllTests
-            # we have a scenario, but no specific group. Let's run any other test
-            # exclude any test specifically tied to a non-autodetect scenario
-            $TiedFunctions = ($TestsRunGroups.GetEnumerator() | Where-Object { $_.Value -notlike 'autodetect_*' }).Value
-            $RemainingTests = $AllTests | Where-Object { ($_.Name -replace '^([^.]+)(.+)?.Tests.ps1', '$1') -notin $TiedFunctions }
-            # scan for all tests containing ALL autodetect strings
-            $ScanFor = @() + ($TestsRunGroups.GetEnumerator() | Where-Object { $_.Value -like 'autodetect_*' }).Value.Replace('autodetect_', '')
-            $ScanTests = @()
-            foreach ($test in $RemainingTests) {
-                $FoundFlag = 0
-                $testcontent = Get-Content $test -Raw
-                foreach ($Scan in $ScanFor) {
-                    if ($testcontent -like "*$Scan*") {
-                        $FoundFlag += 1
-                    }
-                }
-                if ($FoundFlag -eq $ScanFor.Count -or $FoundFlag -eq 0) {
-                    $ScanTests += $test
-                }
+            $AllTestsToExclude = @()
+            $validScenarios = $TestsRunGroups.Keys | Where-Object { $_ -notin @('disabled', 'appveyor_disabled') }
+            foreach ($k in $validScenarios) {
+                $AllTestsToExclude += Get-TestsForScenario -scenario $k -AllTest $AllTests
             }
-            $AllScenarioTests = $ScanTests
+            $AllScenarioTests = $AllTests | Where-Object { $_ -notin $AllTestsToExclude }
         }
     }
     else {
         $AllScenarioTests = $AllTests
     }
-
     Write-Host -ForegroundColor DarkGreen "Test Groups   : Reduced to $($AllScenarioTests.Count) out of $($AllDbatoolsTests.Count) tests"
+    # do we have a part ? (1/2, 2/2, etc)
+    if ($env:PART) {
+        try {
+            [int]$num, [int]$denom = $env:PART.Split('/')
+            Write-Host -ForegroundColor DarkGreen "Test Parts    : part $($env:PART) on total $($AllScenarioTests.Count)"
+            #shuffle things a bit (i.e. with natural sorting most of the *get* fall into the first part, all the *set* in the last, etc)
+            $AllScenarioTestsShuffled = $AllScenarioTests | Sort-Object -Property @{Expression={ $_.Name.Split('-')[-1].Replace('Dba', '') }; Ascending = $true}
+            $scenarioParts = Split-ArrayInParts -array $AllScenarioTestsShuffled -parts $denom
+            $AllScenarioTests = $scenarioParts[$num-1] | Sort-Object -Property Name
+        } catch {
+        }
+    }
     if ($AllTests.Count -eq 0 -and $AllScenarioTests.Count -eq 0) {
         throw "something went wrong, nothing to test"
     }
@@ -287,7 +332,10 @@ if (-not $Finalize) {
         }
         # Pester 4.0 outputs already what file is being ran. If we remove write-host from every test, we can time
         # executions for each test script (i.e. Executing Get-DbaFoo .... Done (40 seconds))
-        Invoke-Pester @PesterSplat | Export-Clixml -Path "$ModuleBase\PesterResults$PSVersion$Counter.xml"
+        Add-AppveyorTest -Name $f.Name -Framework NUnit -FileName $f.FullName -Outcome Running
+        $PesterRun = Invoke-Pester @PesterSplat
+        $PesterRun | Export-Clixml -Path "$ModuleBase\PesterResults$PSVersion$Counter.xml"
+        Update-AppveyorTest -Name $f.Name -Framework NUnit -FileName $f.FullName -Outcome Passed -Duration $PesterRun.Time.TotalMilliseconds
     }
 }
 else {

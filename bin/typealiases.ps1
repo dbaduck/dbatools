@@ -17,6 +17,12 @@ $TypeAliasTable = @{
     DbaMode                  = "Sqlcollaborative.Dbatools.General.ExecutionMode"
     DbaCredential            = "Sqlcollaborative.Dbatools.Parameter.DbaCredentialparameter"
     DbaCredentialParameter   = "Sqlcollaborative.Dbatools.Parameter.DbaCredentialparameter"
+    DbaDatabaseSmo           = "SqlCollaborative.Dbatools.Parameter.DbaDatabaseSmoParameter"
+    DbaDatabaseSmoParameter  = "SqlCollaborative.Dbatools.Parameter.DbaDatabaseSmoParameter"
+    DbaDatabase              = "SqlCollaborative.Dbatools.Parameter.DbaDatabaseParameter"
+    DbaDatabaseParameter     = "SqlCollaborative.Dbatools.Parameter.DbaDatabaseParameter"
+    DbaValidatePattern       = "Sqlcollaborative.Dbatools.Utility.DbaValidatePatternAttribute"
+    DbaValidateScript        = "Sqlcollaborative.Dbatools.Utility.DbaValidateScriptAttribute"
 }
 
 # Add all type aliases
@@ -27,3 +33,4 @@ foreach ($TypeAlias in $TypeAliasTable.Keys) {
     catch {
     }
 }
+

@@ -1,8 +1,6 @@
 $indent = '...'
 Write-Host -Object "$indent Running $PSCommandpath" -ForegroundColor DarkGreen
-$dbatools_serialimport = $true
-Import-Module C:\github\dbatools\dbatools.psd1
-Start-Sleep 5
+Import-Module C:\github\dbatools\dbatools.psm1 -Force
 
 # This script spins up the 2008R2SP2 instance and the relative setup
 
@@ -25,12 +23,12 @@ foreach ($ipAddress in $Tcp.IPAddresses) {
 }
 $Tcp.Alter()
 Write-Host -Object "$indent Starting $instance" -ForegroundColor DarkGreen
-Restart-Service "MSSQL`$$instance" -WarningAction SilentlyContinue
+Restart-Service "MSSQL`$$instance" -WarningAction SilentlyContinue -Force
 $server = Connect-DbaInstance -SqlInstance $sqlinstance
 $server.Configuration.RemoteDacConnectionsEnabled.ConfigValue = $true
 $server.Configuration.Alter()
 $null = Set-DbaStartupParameter -SqlInstance $sqlinstance -TraceFlagsOverride -TraceFlags 7806 -Confirm:$false -ErrorAction SilentlyContinue -EnableException
-Restart-Service "MSSQL`$SQL2008R2SP2" -WarningAction SilentlyContinue
+Restart-Service "MSSQL`$SQL2008R2SP2" -WarningAction SilentlyContinue -Force
 $server = Connect-DbaInstance -SqlInstance $sqlinstance
 $server.Configuration.RemoteDacConnectionsEnabled.ConfigValue = $true
 $server.Configuration.Alter()
@@ -46,3 +44,5 @@ Write-Host -Object "$indent Executing startup scripts for SQL Server 2008" -Fore
 foreach ($file in (Get-ChildItem C:\github\appveyor-lab\sql2008-startup\*.sql -Recurse -ErrorAction SilentlyContinue)) {
     Invoke-Sqlcmd2 -ServerInstance $sqlinstance -InputFile $file
 }
+
+Import-Module C:\github\dbatools\dbatools.psm1 -Force
