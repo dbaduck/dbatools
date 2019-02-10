@@ -43,7 +43,7 @@ function Test-DbaDeprecatedFeature {
         Check deprecated features on server sql2008 for only the testdb and db2 databases
 
     .EXAMPLE
-        PS C:\> Get-DbaDatabase -SqlInstance sql2008 -Database testdb, db2 | Test-DbaDeprecatedFeature | Select *
+        PS C:\> Get-DbaDatabase -SqlInstance sql2008 -Database testdb, db2 | Test-DbaDeprecatedFeature | Select-Object *
 
         See the object definition in the output as well
 
@@ -57,7 +57,7 @@ function Test-DbaDeprecatedFeature {
 
         Check deprecated features on server sql2008 for only the TestDB database
 
-#>
+    #>
     [CmdletBinding()]
     param (
         [Alias("ServerInstance", "SqlServer", "SqlServers")]
@@ -105,4 +105,3 @@ function Test-DbaDeprecatedFeature {
         }
     }
 }
-

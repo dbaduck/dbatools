@@ -48,7 +48,7 @@ function Get-DbaDbMailServer {
         Returns The DBA Team DBMail server from sql01\sharepoint
 
     .EXAMPLE
-        PS C:\> Get-DbaDbMailServer -SqlInstance sql01\sharepoint | Select *
+        PS C:\> Get-DbaDbMailServer -SqlInstance sql01\sharepoint | Select-Object *
 
         Returns the DBMail servers on sql01\sharepoint then return a bunch more columns
 
@@ -58,7 +58,7 @@ function Get-DbaDbMailServer {
 
         Returns the DBMail servers for "sql2014","sql2016" and "sqlcluster\sharepoint"
 
-#>
+    #>
     [CmdletBinding()]
     param (
         [Alias("ServerInstance", "SqlServer")]
@@ -104,4 +104,3 @@ function Get-DbaDbMailServer {
         }
     }
 }
-

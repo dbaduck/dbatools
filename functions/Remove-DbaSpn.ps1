@@ -56,17 +56,17 @@ function Remove-DbaSpn {
         Connects to Active Directory and removes a provided SPN to the given account. Uses alternative account to connect to AD.
 
     .EXAMPLE
-        PS C:\> Test-DbaSpn -ComputerName sql2005 | Where { $_.isSet -eq $true } | Remove-DbaSpn -WhatIf
+        PS C:\> Test-DbaSpn -ComputerName sql2005 | Where-Object { $_.isSet -eq $true } | Remove-DbaSpn -WhatIf
 
         Shows what would happen trying to remove all set SPNs for sql2005 and the relative delegations
 
     .EXAMPLE
-        PS C:\> Test-DbaSpn -ComputerName sql2005 | Where { $_.isSet -eq $true } | Remove-DbaSpn
+        PS C:\> Test-DbaSpn -ComputerName sql2005 | Where-Object { $_.isSet -eq $true } | Remove-DbaSpn
 
         Removes all set SPNs for sql2005 and the relative delegations
 
-#>
-    [cmdletbinding(SupportsShouldProcess = $true, DefaultParameterSetName = "Default")]
+    #>
+    [cmdletbinding(SupportsShouldProcess, DefaultParameterSetName = "Default")]
     param (
         [Parameter(Mandatory, ValueFromPipelineByPropertyName)]
         [Alias("RequiredSPN")]
@@ -74,7 +74,7 @@ function Remove-DbaSpn {
         [Parameter(Mandatory, ValueFromPipelineByPropertyName)]
         [Alias("InstanceServiceAccount", "AccountName")]
         [string]$ServiceAccount,
-        [Parameter(Mandatory = $false, ValueFromPipelineByPropertyName)]
+        [Parameter(ValueFromPipelineByPropertyName)]
         [PSCredential]$Credential,
         [Alias('Silent')]
         [switch]$EnableException
@@ -175,4 +175,3 @@ function Remove-DbaSpn {
         }
     }
 }
-

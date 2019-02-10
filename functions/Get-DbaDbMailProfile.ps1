@@ -48,7 +48,7 @@ function Get-DbaDbMailProfile {
         Returns The DBA Team DBMail profile from sql01\sharepoint
 
     .EXAMPLE
-        PS C:\> Get-DbaDbMailProfile -SqlInstance sql01\sharepoint | Select *
+        PS C:\> Get-DbaDbMailProfile -SqlInstance sql01\sharepoint | Select-Object *
 
         Returns the DBMail profiles on sql01\sharepoint then return a bunch more columns
 
@@ -58,7 +58,7 @@ function Get-DbaDbMailProfile {
 
         Returns the DBMail profiles for "sql2014","sql2016" and "sqlcluster\sharepoint"
 
-#>
+    #>
     [CmdletBinding()]
     param (
         [Alias("ServerInstance", "SqlServer")]
@@ -105,4 +105,3 @@ function Get-DbaDbMailProfile {
         }
     }
 }
-

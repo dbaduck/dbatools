@@ -52,7 +52,7 @@ function Get-DbaCpuRingBuffer {
         Gets CPU Statistics from sys.dm_os_ring_buffers for server sql2008 for last 240 minutes
 
     .EXAMPLE
-        PS C:\> $output = Get-DbaCpuRingBuffer -SqlInstance sql2008 -CollectionMinutes 240 | Select * | ConvertTo-DbaDataTable
+        PS C:\> $output = Get-DbaCpuRingBuffer -SqlInstance sql2008 -CollectionMinutes 240 | Select-Object * | ConvertTo-DbaDataTable
 
         Gets CPU Statistics from sys.dm_os_ring_buffers for server sql2008 for last 240 minutes into a Data Table.
 
@@ -66,7 +66,7 @@ function Get-DbaCpuRingBuffer {
         PS C:\> Get-DbaCpuRingBuffer -SqlInstance sql2008 -SqlCredential $cred
 
         Connects using sqladmin credential and returns CPU Statistics from sys.dm_os_ring_buffers from sql2008
-#>
+    #>
     [CmdletBinding()]
     Param (
         [parameter(Mandatory, ValueFromPipeline)]
@@ -140,4 +140,3 @@ function Get-DbaCpuRingBuffer {
         }
     }
 }
-

@@ -6,7 +6,7 @@ function Sync-DbaAvailabilityGroup {
 
     .DESCRIPTION
         Syncs depdendent objects for availability groups. Such objects include:
-    
+
         SpConfigure
         CustomErrors
         Credentials
@@ -22,11 +22,11 @@ function Sync-DbaAvailabilityGroup {
         AgentProxy
         AgentSchedule
         AgentJob
-    
+
         Note that any of these can be excluded. For specific object exclusions (such as a single job), using the underlying Copy-Dba* command will be required.
-    
+
         This command does not filter by which logins are in use by the ag databases or which linked servers are used. All objects that are not excluded will be copied like hulk smash.
-    
+
     .PARAMETER Primary
         The primary SQL Server instance. Server version must be SQL Server version 2012 or higher.
 
@@ -60,10 +60,22 @@ function Sync-DbaAvailabilityGroup {
         AgentProxy
         AgentSchedule
         AgentJob
-        
+
+    .PARAMETER Login
+        Specific logins to sync. If unspecified, all logins will be processed.
+
+    .PARAMETER ExcludeLogin
+        Specific logins to exclude when performing the sync. If unspecified, all logins will be processed.
+
+    .PARAMETER Job
+        Specific jobs to sync. If unspecified, all jobs will be processed.
+
+    .PARAMETER ExcludeJob
+         Specific jobs to exclude when performing the sync. If unspecified, all jobs will be processed.
+
     .PARAMETER InputObject
         Enables piping from Get-DbaAvailabilityGroup.
-    
+
     .PARAMETER Force
         If this switch is enabled, the objects will dropped and recreated on Destination.
 
@@ -94,21 +106,23 @@ function Sync-DbaAvailabilityGroup {
         Syncs the following on all replicas found in the db3 AG:
         SpConfigure, CustomErrors, Credentials, DatabaseMail, LinkedServers
         Logins, LoginPermissions, SystemTriggers, DatabaseOwner, AgentCategory,
-        AgentOperator, AgentAlert, AgentProxy, AgentScheduleAgentJob
-    
-    .EXAMPLE
-        PS C:\> Get-DbaAvailabilityGroup -SqlInstance sql2016a | Sync-DbaAvailabilityGroup -Exclude LoginPermissions, LinkedServers
+        AgentOperator, AgentAlert, AgentProxy, AgentSchedule, AgentJob
 
-        Syncs the following on all replicas found in the db3 AG:
+    .EXAMPLE
+        PS C:\> Get-DbaAvailabilityGroup -SqlInstance sql2016a | Sync-DbaAvailabilityGroup -ExcludeType LoginPermissions, LinkedServers -ExcludeLogin login1, login2 -Job job1, job2
+
+        Syncs the following on all replicas found in all AGs on the specified instance:
         SpConfigure, CustomErrors, Credentials, DatabaseMail, Logins,
         SystemTriggers, DatabaseOwner, AgentCategory, AgentOperator
-        AgentAlert, AgentProxy, AgentScheduleAgentJob
-    
+        AgentAlert, AgentProxy, AgentSchedule, AgentJob.
+
+        Copies all logins except for login1 and login2 and only syncs job1 and job2
+
     .EXAMPLE
         PS C:\> Get-DbaAvailabilityGroup -SqlInstance sql2016a | Sync-DbaAvailabilityGroup -WhatIf
 
         Shows what would happen if the command were to run but doesn't actually perform the action.
-#>
+    #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     param (
         [DbaInstanceParameter]$Primary,
@@ -116,8 +130,13 @@ function Sync-DbaAvailabilityGroup {
         [DbaInstanceParameter[]]$Secondary,
         [PSCredential]$SecondarySqlCredential,
         [string]$AvailabilityGroup,
+        [Alias("ExcludeType")]
         [ValidateSet('AgentCategory', 'AgentOperator', 'AgentAlert', 'AgentProxy', 'AgentSchedule', 'AgentJob', 'Credentials', 'CustomErrors', 'DatabaseMail', 'DatabaseOwner', 'LinkedServers', 'Logins', 'LoginPermissions', 'SpConfigure', 'SystemTriggers')]
         [string[]]$Exclude,
+        [string[]]$Login,
+        [string[]]$ExcludeLogin,
+        [string[]]$Job,
+        [string[]]$ExcludeJob,
         [parameter(ValueFromPipeline)]
         [Microsoft.SqlServer.Management.Smo.AvailabilityGroup[]]$InputObject,
         [switch]$Force,
@@ -131,7 +150,7 @@ function Sync-DbaAvailabilityGroup {
             Stop-Function -Message "You must specify a secondary or an availability group."
             return
         }
-                
+
         if ($InputObject) {
             $server = $InputObject.Parent
         } else {
@@ -142,15 +161,15 @@ function Sync-DbaAvailabilityGroup {
                 return
             }
         }
-        
+
         if ($AvailabilityGroup) {
             $InputObject += Get-DbaAvailabilityGroup -SqlInstance $server -AvailabilityGroup $AvailabilityGroup
         }
-        
+
         if ($InputObject) {
             $Secondary += (($InputObject.AvailabilityReplicas | Where-Object Name -ne $server.DomainInstanceName).Name | Select-Object -Unique)
         }
-        
+
         if ($Secondary) {
             $Secondary = $Secondary | Sort-Object
             $secondaries = @()
@@ -163,60 +182,60 @@ function Sync-DbaAvailabilityGroup {
                 }
             }
         }
-        
+
         $thiscombo = [pscustomobject]@{
             PrimaryServer   = $server
             SecondaryServer = $secondaries
         }
-        
+
         # In the event that someone pipes in an availability group, this will keep the syncer from running a bunch of times
         $dupe = $false
-        
+
         foreach ($ag in $allcombos) {
             if ($ag.PrimaryServer.Name -eq $thiscombo.PrimaryServer.Name -and
                 $ag.SecondaryServer.Name.ToString() -eq $thiscombo.SecondaryServer.Name.ToString()) {
                 $dupe = $true
             }
         }
-        
+
         if ($dupe -eq $false) {
             $allcombos += $thiscombo
         }
     }
-    
+
     end {
         if (Test-FunctionInterrupt) { return }
-        
+
         # now that all combinations have been figured out, begin sync without duplicating work
         foreach ($ag in $allcombos) {
             $server = $ag.PrimaryServer
             $secondaries = $ag.SecondaryServer
-            
+
             $stepCounter = 0
             $activity = "Syncing availability group $AvailabilityGroup"
-            
+
             if (-not $secondaries) {
                 Stop-Function -Message "No secondaries found."
                 return
             }
-            
+
             $primaryserver = $server.Name
             $secondaryservers = $secondaries.Name -join ", "
-            
+
             if ($Exclude -notcontains "SpConfigure") {
                 if ($PSCmdlet.ShouldProcess("Syncing SQL Server Configuration from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing SQL Server Configuration"
                     Copy-DbaSpConfigure -Source $server -Destination $secondaries
                 }
             }
-            
+
             if ($Exclude -notcontains "Logins") {
                 if ($PSCmdlet.ShouldProcess("Syncing logins from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing logins"
-                    Copy-DbaLogin -Source $server -Destination $secondaries -Force:$Force
+                    Copy-DbaLogin -Source $server -Destination $secondaries -ExcludeLogin $ExcludeLogin -Force:$Force
                 }
             }
-            
+
             if ($Exclude -notcontains "DatabaseOwner") {
                 if ($PSCmdlet.ShouldProcess("Updating database owners to match newly migrated logins from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Updating database owners to match newly migrated logins"
@@ -225,52 +244,52 @@ function Sync-DbaAvailabilityGroup {
                     }
                 }
             }
-            
+
             if ($Exclude -notcontains "CustomErrors") {
                 if ($PSCmdlet.ShouldProcess("Syncing custom errors (user defined messages) from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing custom errors (user defined messages)"
                     Copy-DbaCustomError -Source $server -Destination $secondaries -Force:$Force
                 }
             }
-            
+
             if ($Exclude -notcontains "Credentials") {
                 if ($PSCmdlet.ShouldProcess("Syncing SQL credentials from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing SQL credentials"
                     Copy-DbaCredential -Source $server -Destination $secondaries -Force:$Force
                 }
             }
-            
+
             if ($Exclude -notcontains "DatabaseMail") {
                 if ($PSCmdlet.ShouldProcess("Syncing database mail from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing database mail"
                     Copy-DbaDbMail -Source $server -Destination $secondaries -Force:$Force
                 }
             }
-            
+
             if ($Exclude -notcontains "LinkedServers") {
                 if ($PSCmdlet.ShouldProcess("Syncing linked servers from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing linked servers"
                     Copy-DbaLinkedServer -Source $server -Destination $secondaries -Force:$Force
                 }
             }
-            
+
             if ($Exclude -notcontains "SystemTriggers") {
                 if ($PSCmdlet.ShouldProcess("Syncing System Triggers from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing System Triggers"
                     Copy-DbaServerTrigger -Source $server -Destination $secondaries -Force:$Force
                 }
             }
-            
+
             if ($Exclude -notcontains "AgentCategory") {
                 if ($PSCmdlet.ShouldProcess("Syncing Agent Categories from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing Agent Categories"
-                    Copy-DbaAgentCategory -Source $server -Destination $secondaries -Force:$force
+                    Copy-DbaAgentJobCategory -Source $server -Destination $secondaries -Force:$force
                     $secondaries.JobServer.JobCategories.Refresh()
                     $secondaries.JobServer.OperatorCategories.Refresh()
                     $secondaries.JobServer.AlertCategories.Refresh()
                 }
             }
-            
+
             if ($Exclude -notcontains "AgentOperator") {
                 if ($PSCmdlet.ShouldProcess("Syncing Agent Operators from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing Agent Operators"
@@ -278,7 +297,7 @@ function Sync-DbaAvailabilityGroup {
                     $secondaries.JobServer.Operators.Refresh()
                 }
             }
-            
+
             if ($Exclude -notcontains "AgentAlert") {
                 if ($PSCmdlet.ShouldProcess("Syncing Agent Alerts from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing Agent Alerts"
@@ -286,36 +305,36 @@ function Sync-DbaAvailabilityGroup {
                     $secondaries.JobServer.Alerts.Refresh()
                 }
             }
-            
+
             if ($Exclude -notcontains "AgentProxy") {
                 if ($PSCmdlet.ShouldProcess("Syncing Agent Proxy Accounts from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing Agent Proxy Accounts"
-                    Copy-DbaAgentProxyAccount -Source $server -Destination $secondaries -Force:$force
+                    Copy-DbaAgentProxy -Source $server -Destination $secondaries -Force:$force
                     $secondaries.JobServer.ProxyAccounts.Refresh()
                 }
             }
-            
+
             if ($Exclude -notcontains "AgentSchedule") {
                 if ($PSCmdlet.ShouldProcess("Syncing Agent Schedules from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing Agent Schedules"
-                    Copy-DbaAgentSharedSchedule -Source $server -Destination $secondaries -Force:$force
+                    Copy-DbaAgentSchedule -Source $server -Destination $secondaries -Force:$force
                     $secondaries.JobServer.SharedSchedules.Refresh()
                     $secondaries.JobServer.Refresh()
                     $secondaries.Refresh()
                 }
             }
-            
+
             if ($Exclude -notcontains "AgentJob") {
                 if ($PSCmdlet.ShouldProcess("Syncing Agent Jobs from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing Agent Jobs"
-                    Copy-DbaAgentJob -Source $server -Destination $secondaries -Force:$force
+                    Copy-DbaAgentJob -Source $server -Destination $secondaries -Force:$force -Job $Job -ExcludeJob $ExcludeJob
                 }
             }
-            
+
             if ($Exclude -notcontains "LoginPermissions") {
                 if ($PSCmdlet.ShouldProcess("Syncing login permissions from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing login permissions"
-                    Sync-DbaLoginPermission -Source $server -Destination $secondaries
+                    Sync-DbaLoginPermission -Source $server -Destination $secondaries -Login $Login -ExcludeLogin $ExcludeLogin
                 }
             }
         }

@@ -37,11 +37,11 @@ function Get-DbaWsfcRole {
         Gets role information from the failover cluster cluster01
 
     .EXAMPLE
-        PS C:\> Get-DbaWsfcRole -ComputerName cluster01 | Select *
+        PS C:\> Get-DbaWsfcRole -ComputerName cluster01 | Select-Object *
 
         Shows all role values, including the ones not shown in the default view
 
-#>
+    #>
     [CmdletBinding()]
     param (
         [parameter(ValueFromPipeline)]
@@ -60,4 +60,3 @@ function Get-DbaWsfcRole {
         }
     }
 }
-

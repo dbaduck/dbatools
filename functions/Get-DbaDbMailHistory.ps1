@@ -40,7 +40,7 @@ function Get-DbaDbMailHistory {
         Returns the entire DBMail history on sql01\sharepoint
 
     .EXAMPLE
-        PS C:\> Get-DbaDbMailHistory -SqlInstance sql01\sharepoint | Select *
+        PS C:\> Get-DbaDbMailHistory -SqlInstance sql01\sharepoint | Select-Object *
 
         Returns the entire DBMail history on sql01\sharepoint then return a bunch more columns
 
@@ -50,7 +50,7 @@ function Get-DbaDbMailHistory {
 
         Returns the all DBMail history for "sql2014","sql2016" and "sqlcluster\sharepoint"
 
-#>
+    #>
     [CmdletBinding()]
     param (
         [Parameter(ValueFromPipeline)]
@@ -141,4 +141,3 @@ function Get-DbaDbMailHistory {
         }
     }
 }
-

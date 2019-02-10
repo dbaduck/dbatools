@@ -58,7 +58,7 @@ function Get-DbaEstimatedCompletionTime {
         Gets estimated completion times for queries performed against the entire server
 
     .EXAMPLE
-        PS C:\> Get-DbaEstimatedCompletionTime -SqlInstance sql2016 | Select *
+        PS C:\> Get-DbaEstimatedCompletionTime -SqlInstance sql2016 | Select-Object *
 
         Gets estimated completion times for queries performed against the entire server PLUS the SQL query text of each command
 
@@ -72,7 +72,7 @@ function Get-DbaEstimatedCompletionTime {
 
         Gets estimated completion times for queries performed against the Northwind, pubs, and Adventureworks2014 databases
 
-#>
+    #>
     [CmdletBinding()]
     param (
         [parameter(Mandatory, ValueFromPipeline)]
@@ -154,4 +154,3 @@ function Get-DbaEstimatedCompletionTime {
         }
     }
 }
-

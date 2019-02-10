@@ -58,7 +58,7 @@ function Set-DbaTcpPort {
 
         Sets the port number 1337 for all IP Addresses on SqlInstance sql2017 and sql2019 using the credentials for ad\dba. Prompts for confirmation.
 
-#>
+       #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = "High")]
     param (
         [parameter(Mandatory, ValueFromPipeline)]
@@ -70,7 +70,7 @@ function Set-DbaTcpPort {
         [IpAddress[]]$IpAddress,
         [switch]$EnableException
     )
-    
+
     begin {
         if (-not $IpAddress) {
             $IpAddress = '0.0.0.0'
@@ -86,7 +86,7 @@ function Set-DbaTcpPort {
             $port = $args[2]
             $IpAddress = $args[3]
             $sqlinstanceName = $args[4]
-            
+
             $wmi = New-Object Microsoft.SqlServer.Management.Smo.Wmi.ManagedComputer $computername
             $wmiinstance = $wmi.ServerInstances | Where-Object {
                 $_.Name -eq $wmiinstancename
@@ -100,27 +100,27 @@ function Set-DbaTcpPort {
             $tcpport = $IpAddress.IpAddressProperties | Where-Object {
                 $_.Name -eq 'TcpPort'
             }
-            
+
             $oldport = $tcpport.Value
             try {
                 $tcpport.value = $port
                 $tcp.Alter()
                 [pscustomobject]@{
-                    ComputerName  = $computername
-                    InstanceName  = $wmiinstancename
-                    SqlInstance   = $sqlinstanceName
-                    OldPortNumber = $oldport
-                    PortNumber    = $Port
-                    Status        = "Success"
+                    ComputerName       = $computername
+                    InstanceName       = $wmiinstancename
+                    SqlInstance        = $sqlinstanceName
+                    PreviousPortNumber = $oldport
+                    PortNumber         = $Port
+                    Status             = "Success"
                 }
             } catch {
                 [pscustomobject]@{
-                    ComputerName  = $computername
-                    InstanceName  = $wmiinstancename
-                    SqlInstance   = $sqlinstanceName
-                    OldPortNumber = $oldport
-                    PortNumber    = $Port
-                    Status        = "Failed: $_"
+                    ComputerName       = $computername
+                    InstanceName       = $wmiinstancename
+                    SqlInstance        = $sqlinstanceName
+                    PreviousPortNumber = $oldport
+                    PortNumber         = $Port
+                    Status             = "Failed: $_"
                 }
             }
         }
@@ -129,11 +129,11 @@ function Set-DbaTcpPort {
         if (Test-FunctionInterrupt) {
             return
         }
-        
+
         foreach ($instance in $SqlInstance) {
             $wmiinstancename = $instance.InstanceName
             $computerName = $instance.ComputerName
-            
+
             if ($Pscmdlet.ShouldProcess($computerName, "Setting port to $Port for $wmiinstancename")) {
                 try {
                     $computerName = $instance.ComputerName

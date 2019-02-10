@@ -74,7 +74,7 @@ function Remove-DbaDbSnapshot {
         Removes HR_snapshot and Accounting_snapshot
 
     .EXAMPLE
-        PS C:\> Get-DbaDbSnapshot -SqlInstance sql2016 | Where SnapshotOf -like '*dumpsterfire*' | Remove-DbaDbSnapshot
+        PS C:\> Get-DbaDbSnapshot -SqlInstance sql2016 | Where-Object SnapshotOf -like '*dumpsterfire*' | Remove-DbaDbSnapshot
 
         Removes all snapshots associated with databases that have dumpsterfire in the name
 
@@ -93,7 +93,7 @@ function Remove-DbaDbSnapshot {
 
         Removes all database snapshots from sql2014 and prompts for each database
 
-#>
+    #>
     [CmdletBinding(SupportsShouldProcess)]
     param (
         [Alias("ServerInstance", "SqlServer")]
@@ -172,4 +172,3 @@ function Remove-DbaDbSnapshot {
         Test-DbaDeprecation -DeprecatedOn "1.0.0" -Alias Remove-DbaDatabaseSnapshot
     }
 }
-

@@ -40,7 +40,7 @@ function Get-DbaDbMailLog {
         Returns the entire DBMail log on sql01\sharepoint
 
     .EXAMPLE
-        PS C:\> Get-DbaDbMailLog -SqlInstance sql01\sharepoint | Select *
+        PS C:\> Get-DbaDbMailLog -SqlInstance sql01\sharepoint | Select-Object *
 
         Returns the entire DBMail log on sql01\sharepoint, includes all returned information.
 
@@ -50,7 +50,7 @@ function Get-DbaDbMailLog {
 
         Returns only the Error and Information DBMail log for "sql2014","sql2016" and "sqlcluster\sharepoint"
 
-#>
+    #>
     [CmdletBinding()]
     param (
         [Parameter(ValueFromPipeline)]
@@ -123,4 +123,3 @@ function Get-DbaDbMailLog {
         }
     }
 }
-

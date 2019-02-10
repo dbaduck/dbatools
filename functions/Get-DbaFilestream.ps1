@@ -1,3 +1,4 @@
+#ValidationTags#CodeStyle,Messaging,FlowControl,Pipeline#
 function Get-DbaFilestream {
     <#
     .SYNOPSIS
@@ -37,12 +38,12 @@ function Get-DbaFilestream {
         PS C:\> Get-DbaFilestream -SqlInstance server1\instance2
 
         Will return the status of Filestream configuration for the service and instance server1\instance2
-    
+
     .EXAMPLE
         PS C:\> Get-DbaFilestream -SqlInstance server1\instance2 -SqlCredential sqladmin
 
         Prompts for the password to the SQL Login "sqladmin" then returns the status of Filestream configuration for the service and instance server1\instance2
-    #>
+       #>
     [CmdletBinding()]
     param (
         [parameter(ValueFromPipeline)]

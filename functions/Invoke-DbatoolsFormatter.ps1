@@ -30,7 +30,7 @@ function Invoke-DbatoolsFormatter {
 
         Reformats C:\dbatools\functions\Get-DbaDatabase.ps1 to dbatools' standards
 
-#>
+    #>
     [CmdletBinding()]
     param (
         [parameter(Mandatory, ValueFromPipeline)]
@@ -44,7 +44,7 @@ function Invoke-DbatoolsFormatter {
         }
         $CBHRex = [regex]'(?smi)\s+<#[^#]*#>'
         $CBHStartRex = [regex]'(?<spaces>[ ]+)<#'
-        $CBHEndRex = [regex]'(?<spaces>[ ]?)#>'
+        $CBHEndRex = [regex]'(?<spaces>[ ]*)#>'
     }
     process {
         if (Test-FunctionInterrupt) { return }
@@ -73,7 +73,7 @@ function Invoke-DbatoolsFormatter {
                     $newCBH = $CBHEndRex.Replace($CBH, "$startSpaces#>")
                     if ($newCBH) {
                         #replace the CBH
-                        $content = $CBHRex.Replace($content, $newCBH, 1)
+                        $content = $content.Replace($CBH, $newCBH)
                     }
                 }
             }
