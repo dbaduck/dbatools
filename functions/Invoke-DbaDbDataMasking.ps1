@@ -129,9 +129,13 @@ function Invoke-DbaDbDataMasking {
         [switch]$EnableException
     )
     begin {
-        # Create the faker objects
-        Add-Type -Path (Resolve-Path -Path "$script:PSModuleRoot\bin\datamasking\Bogus.dll")
-        $faker = New-Object Bogus.Faker($Locale)
+        $supportedDataTypes = 'bit', 'bool', 'char', 'date', 'datetime', 'datetime2', 'decimal', 'int', 'money', 'nchar', 'ntext', 'nvarchar', 'smalldatetime', 'text', 'time', 'uniqueidentifier', 'userdefineddatatype', 'varchar'
+
+        $supportedFakerMaskingTypes = Get-DbaRandomizedType | Select-Object Type -ExpandProperty Type -Unique
+
+        $supportedFakerSubTypes = Get-DbaRandomizedType | Select-Object Subtype -ExpandProperty Subtype -Unique
+
+        $supportedFakerSubTypes += "Date"
     }
 
     process {
@@ -163,37 +167,40 @@ function Invoke-DbaDbDataMasking {
             }
             foreach ($columntest in $tabletest.Columns) {
                 if ($columntest.ColumnType -in 'hierarchyid', 'geography', 'xml', 'geometry' -and $columntest.Name -notin $Column) {
-                    Stop-Function -Message "$($columntest.ColumnType) is not supported, please remove the column $($columntest.Name) from the $($tabletest.Name) table" -Target $tables
+                    Stop-Function -Message "$($columntest.ColumnType) is not supported, please remove the column $($columntest.Name) from the $($tabletest.Name) table" -Target $tables -Continue
                 }
             }
         }
 
-        if (Test-FunctionInterrupt) {
-            return
-        }
-
-        $dictionary = @{}
+        $dictionary = @{ }
 
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 9
+                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $sqlcredential -MinimumVersion 9
             } catch {
-                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
-            if ($Database) {
-                $dbs = Get-DbaDatabase -SqlInstance $server -Database $Database
-            } else {
-                $dbs = Get-DbaDatabase -SqlInstance $server -Database $tables.Name
+            if (-not $Database) {
+                $Database = $tables.Name
             }
 
-            $sqlconn = $server.ConnectionContext.SqlConnectionObject.PsObject.Copy()
-            $sqlconn.Open()
+            foreach ($dbname in $Database) {
+                if ($server.VersionMajor -lt 9) {
+                    Stop-Function -Message "SQL Server version must be 2005 or greater" -Continue
+                }
+                $db = $server.Databases[$($dbName)]
 
-            foreach ($db in $dbs) {
+                $connstring = New-DbaConnectionString -SqlInstance $instance -SqlCredential $SqlCredential -Database $dbName
+                $sqlconn = New-Object System.Data.SqlClient.SqlConnection $connstring
+                $sqlconn.Open()
                 $stepcounter = $nullmod = 0
+
                 foreach ($tableobject in $tables.Tables) {
-                    if ($tableobject.Name -in $ExcludeTable -or ($Table -and $tableobject.Name -notin $Table)) {
+                    $uniqueValues = @()
+                    $uniqueValueColumns = @()
+
+                    if ($tableobject.Name -in $ExcludeTable) {
                         Write-Message -Level Verbose -Message "Skipping $($tableobject.Name) because it is explicitly excluded"
                         continue
                     }
@@ -201,17 +208,112 @@ function Invoke-DbaDbDataMasking {
                     if ($tableobject.Name -notin $db.Tables.Name) {
                         Stop-Function -Message "Table $($tableobject.Name) is not present in $db" -Target $db -Continue
                     }
+
+                    $dbTable = $db.Tables | Where-Object { $_.Schema -eq $tableobject.Schema -and $_.Name -eq $tableobject.Name }
+
                     try {
                         if (-not (Test-Bound -ParameterName Query)) {
-                            $query = "SELECT * FROM [$($tableobject.Schema)].[$($tableobject.Name)]"
+                            $columnString = "[" + (($dbTable.Columns | Where-Object DataType -in $supportedDataTypes | Select-Object Name -ExpandProperty Name) -join "],[") + "]"
+                            $query = "SELECT $($columnString) FROM [$($tableobject.Schema)].[$($tableobject.Name)]"
                         }
-                        $data = $server.Databases[$($db.Name)].Query($query) | ConvertTo-DbaDataTable
+                        $data = $db.Query($query) | ConvertTo-DbaDataTable
                     } catch {
                         Stop-Function -Message "Failure retrieving the data from table $($tableobject.Name)" -Target $Database -ErrorRecord $_ -Continue
                     }
 
-                    $sqlconn.ChangeDatabase($db.Name)
-                    
+                    # Check if the table contains unique indexes
+                    if ($tableobject.HasUniqueIndex) {
+
+                        # Loop through the rows and generate a unique value for each row
+                        Write-Message -Level Verbose -Message "Generating unique values for $($tableobject.Name)"
+
+                        for ($i = 0; $i -lt $data.Rows.Count; $i++) {
+
+                            $rowValue = New-Object PSCustomObject
+
+                            # Loop through each of the unique indexes
+                            foreach ($index in ($db.Tables[$($tableobject.Name)].Indexes | Where-Object IsUnique -eq $true )) {
+
+                                # Loop through the index columns
+                                foreach ($indexColumn in $index.IndexedColumns) {
+
+                                    if (-not $dbTable.Columns[$indexColumn.Name].Identity) {
+
+                                        # Get the column mask info
+                                        $columnMaskInfo = $tableobject.Columns | Where-Object Name -eq $indexColumn.Name
+
+                                        if ($columnMaskInfo) {
+                                            # Generate a new value
+                                            try {
+                                                if (-not $columnobject.SubType -and $columnobject.ColumnType -in $supportedDataTypes) {
+                                                    $newValue = Get-DbaRandomizedValue -DataType $columnMaskInfo.SubType -Min $columnMaskInfo.MinValue -Max $columnMaskInfo.MaxValue -Locale $Locale
+                                                } else {
+                                                    $newValue = Get-DbaRandomizedValue -RandomizerType $columnMaskInfo.MaskingType -RandomizerSubtype $columnMaskInfo.SubType -Min $columnMaskInfo.MinValue -Max $columnMaskInfo.MaxValue -Locale $Locale
+                                                }
+
+                                            } catch {
+                                                Stop-Function -Message "Failure" -Target $columnMaskInfo -Continue -ErrorRecord $_
+                                            }
+
+                                            # Check if the value is already present as a property
+                                            if (($rowValue | Get-Member -MemberType NoteProperty).Name -notcontains $indexColumn.Name) {
+                                                $rowValue | Add-Member -Name $indexColumn.Name -Type NoteProperty -Value $newValue
+                                            }
+                                        }
+
+                                        # To be sure the values are unique, loop as long as long as needed to generate a unique value
+                                        <# if ($uniqueValues.Count -ge 1) { #>
+                                        while (($uniqueValues | Select-Object -Property ($rowValue | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name)) -match $rowValue) {
+
+                                            $rowValue = New-Object PSCustomObject
+
+                                            # Loop through the index columns
+                                            foreach ($indexColumn in $index.IndexedColumns) {
+
+                                                # Get the column mask info
+                                                $columnMaskInfo = $tableobject.Columns | Where-Object Name -eq $indexColumn.Name
+
+                                                if ($columnMaskInfo) {
+                                                    # Generate a new value
+                                                    try {
+                                                        if (-not $columnobject.SubType -and $columnobject.ColumnType -in $supportedDataTypes) {
+                                                            $newValue = Get-DbaRandomizedValue -DataType $columnMaskInfo.SubType -Min $columnMaskInfo.MinValue -Max $columnMaskInfo.MaxValue -Locale $Locale
+                                                        } else {
+                                                            $newValue = Get-DbaRandomizedValue -RandomizerType $columnMaskInfo.MaskingType -RandomizerSubtype $columnMaskInfo.SubType -Min $columnMaskInfo.MinValue -Max $columnMaskInfo.MaxValue -Locale $Locale
+                                                        }
+
+                                                    } catch {
+                                                        Stop-Function -Message "Failure" -Target $columnMaskInfo -Continue -ErrorRecord $_
+                                                    }
+
+                                                    # Check if the value is already present as a property
+                                                    if (($rowValue | Get-Member -MemberType NoteProperty).Name -notcontains $indexColumn.Name) {
+                                                        $rowValue | Add-Member -Name $indexColumn.Name -Type NoteProperty -Value $newValue
+                                                    }
+
+                                                }
+
+                                            } # End for each index column
+
+                                        } # End while loop
+
+                                        <# } # End if unique value count #>
+
+                                    } # End if identity
+
+                                    # Add the row value to the array
+                                    $uniqueValues += $rowValue
+
+                                } # End for each index column
+
+                            } # End for each index
+
+                        } # End for each data row
+
+                    } # End if had unique index
+
+                    $uniqueValueColumns = $uniqueValueColumns | Select-Object -Unique
+
                     $deterministicColumns = $tables.Tables.Columns | Where-Object Deterministic -eq $true
                     $tablecolumns = $tableobject.Columns
 
@@ -220,27 +322,68 @@ function Invoke-DbaDbDataMasking {
                     }
 
                     if ($ExcludeColumn) {
+                        if ([string]$uniqueIndex.Columns -match ($ExcludeColumn -join "|")) {
+                            Stop-Function -Message "Column present in -ExcludeColumn cannot be excluded because it's part of an unique index" -Target $ExcludeColumn -Continue
+                        }
+
                         $tablecolumns = $tablecolumns | Where-Object Name -notin $ExcludeColumn
                     }
 
                     if (-not $tablecolumns) {
-                        Write-Message -Level Verbose "No columns to process in $($db.Name).$($tableobject.Schema).$($tableobject.Name), moving on"
+                        Write-Message -Level Verbose "No columns to process in $($dbName).$($tableobject.Schema).$($tableobject.Name), moving on"
                         continue
                     }
 
-                    if ($Pscmdlet.ShouldProcess($instance, "Masking $($tablecolumns.Name -join ', ') in $($data.Rows.Count) rows in $($db.Name).$($tableobject.Schema).$($tableobject.Name)")) {
+                    if ($Pscmdlet.ShouldProcess($instance, "Masking $($tablecolumns.Name -join ', ') in $($data.Rows.Count) rows in $($dbName).$($tableobject.Schema).$($tableobject.Name)")) {
+
                         $transaction = $sqlconn.BeginTransaction()
                         $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
-                        Write-ProgressHelper -StepNumber ($stepcounter++) -TotalSteps $tables.Tables.Count -Activity "Masking data" -Message "Updating $($data.Rows.Count) rows in $($tableobject.Schema).$($tableobject.Name) in $($db.Name) on $instance"
+                        Write-ProgressHelper -StepNumber ($stepcounter++) -TotalSteps $tables.Tables.Count -Activity "Masking data" -Message "Updating $($data.Rows.Count) rows in $($tableobject.Schema).$($tableobject.Name) in $($dbName) on $instance"
 
                         # Loop through each of the rows and change them
+                        $rowNumber = 0
+
                         foreach ($row in $data.Rows) {
                             $updates = $wheres = @()
+                            $newValue = $null
 
                             foreach ($columnobject in $tablecolumns) {
+
+                                if ($columnobject.ColumnType -notin $supportedDataTypes) {
+                                    Stop-Function -Message "Unsupported data type '$($columnobject.ColumnType)' for column $($columnobject.Name)" -Target $columnobject -Continue
+                                }
+
+                                if ($columnobject.MaskingType -notin $supportedFakerMaskingTypes) {
+                                    Stop-Function -Message "Unsupported masking type '$($columnobject.MaskingType)' for column $($columnobject.Name)" -Target $columnobject -Continue
+                                }
+
+                                if ($columnobject.SubType -notin $supportedFakerSubTypes) {
+                                    Stop-Function -Message "Unsupported masking sub type '$($columnobject.SubType)' for column $($columnobject.Name)" -Target $columnobject -Continue
+                                }
+
                                 if ($columnobject.Nullable -and (($nullmod++) % $ModulusFactor -eq 0)) {
                                     $newValue = $null
+                                } elseif ($tableobject.HasUniqueIndex -and $columnobject.Name -in $uniqueValueColumns) {
+
+                                    if ($uniqueValues.Count -lt 1) {
+                                        Stop-Function -Message "Could not find any unique values in dictionary" -Target $tableobject
+                                        return
+                                    }
+
+                                    $newValue = $uniqueValues[$rowNumber].$($columnobject.Name)
+
                                 } else {
+                                    # make sure min is good
+                                    if ($columnobject.MinValue) {
+                                        $min = $columnobject.MinValue
+                                    } else {
+                                        if ($columnobject.CharacterString) {
+                                            $min = 1
+                                        } else {
+                                            $min = 0
+                                        }
+                                    }
+
                                     # make sure max is good
                                     if ($MaxValue) {
                                         if ($columnobject.MaxValue -le $MaxValue) {
@@ -262,202 +405,102 @@ function Invoke-DbaDbDataMasking {
                                         $charstring = $CharacterString
                                     }
 
-                                    # make sure min is good
-                                    if ($columnobject.MinValue) {
-                                        $min = $columnobject.MinValue
-                                    } else {
-                                        if ($columnobject.CharacterString) {
-                                            $min = 1
-                                        } else {
-                                            $min = 0
+                                    if ((-not $columnobject.MinValue -or -not $columnobject.MaxValue) -and ($columnobject.ColumnType -match 'date')) {
+                                        if (-not $columnobject.MinValue) {
+                                            $min = (Get-Date).AddDays(-365)
                                         }
-                                    }
-
-                                    if (($columnobject.MinValue -or $columnobject.MaxValue) -and ($columnobject.ColumnType -match 'date')) {
-                                        $nowmin = $columnobject.MinValue
-                                        $nowmax = $columnobject.MaxValue
-                                        if (-not $nowmin) {
-                                            $nowmin = (Get-Date -Date $nowmax).AddDays(-365)
-                                        }
-                                        if (-not $nowmax) {
-                                            $nowmax = (Get-Date -Date $nowmin).AddDays(365)
+                                        if (-not $columnobject.MaxValue) {
+                                            $max = (Get-Date).AddDays(365)
                                         }
                                     }
 
                                     try {
                                         $newValue = $null
 
-                                        if ($columnobject.Deterministic -and ($row.$($columnobject.Name) -in $dictionary.Keys)) {
-                                            $newValue = $dictionary.$($row.$($columnobject.Name))
+                                        if (-not $columnobject.SubType -and $columnobject.ColumnType -in $supportedDataTypes) {
+                                            $newValue = Get-DbaRandomizedValue -DataType $columnobject.ColumnType -Min $min -Max $max -CharacterString $charstring -Locale $Locale
+                                        } else {
+                                            $newValue = Get-DbaRandomizedValue -RandomizerType $columnobject.MaskingType -RandomizerSubtype $columnobject.SubType -Min $min -Max $max -CharacterString $charstring -Locale $Locale
                                         }
 
-                                        if (-not $newValue) {
-                                            $newValue = switch ($columnobject.ColumnType) {
-                                                {
-                                                    $psitem -in 'bit', 'bool'
-                                                } {
-                                                    $faker.System.Random.Bool()
-                                                }
-                                                {
-                                                    $psitem -match 'date'
-                                                } {
-                                                    if ($columnobject.MinValue -or $columnobject.MaxValue) {
-                                                        ($faker.Date.Between($nowmin, $nowmax)).ToString("yyyyMMdd")
-                                                    } else {
-                                                        ($faker.Date.Past()).ToString("yyyyMMdd")
-                                                    }
-                                                }
-                                                {
-                                                    $psitem -match 'int'
-                                                } {
-                                                    if ($columnobject.MinValue -or $columnobject.MaxValue) {
-                                                        $faker.System.Random.Int($columnobject.MinValue, $columnobject.MaxValue)
-                                                    } else {
-                                                        $faker.System.Random.Int(0, $max)
-                                                    }
-                                                }
-                                                'money' {
-                                                    if ($columnobject.MinValue -or $columnobject.MaxValue) {
-                                                        $faker.Finance.Amount($columnobject.MinValue, $columnobject.MaxValue)
-                                                    } else {
-                                                        $faker.Finance.Amount(0, $max)
-                                                    }
-                                                }
-                                                'time' {
-                                                    ($faker.Date.Past()).ToString("h:mm tt zzz")
-                                                }
-                                                'uniqueidentifier' {
-                                                    $faker.System.Random.Guid().Guid
-                                                }
-                                                'userdefineddatatype' {
-                                                    if ($columnobject.MaxValue -eq 1) {
-                                                        $faker.System.Random.Bool()
-                                                    } else {
-                                                        $null
-                                                    }
-                                                }
-                                                default {
-                                                    $null
-                                                }
-                                            }
-                                        }
-
-                                        if (-not $newValue) {
-                                            $newValue = switch ($columnobject.SubType.ToLower()) {
-                                                'number' {
-                                                    $faker.$($columnobject.MaskingType).$($columnobject.SubType)($columnobject.MaxValue)
-                                                }
-                                                {
-                                                    $psitem -in 'bit', 'bool'
-                                                } {
-                                                    $faker.System.Random.Bool()
-                                                }
-                                                {
-                                                    $psitem -in 'date', 'datetime', 'datetime2', 'smalldatetime'
-                                                } {
-                                                    if ($columnobject.MinValue -or $columnobject.MaxValue) {
-                                                        ($faker.Date.Between($nowmin, $nowmax)).ToString("yyyyMMdd")
-                                                    } else {
-                                                        ($faker.Date.Past()).ToString("yyyyMMdd")
-                                                    }
-                                                }
-                                                'shuffle' {
-                                                    ($row.($columnobject.Name) -split '' | Sort-Object {
-                                                            Get-Random
-                                                        }) -join ''
-                                                }
-                                                'string' {
-                                                    if ($max -eq -1) {
-                                                        $max = 1024
-                                                    }
-
-                                                    if ($columnobject.SubType -eq "String" -and (Test-Bound -ParameterName ExactLength)) {
-                                                        $max = ($row.$($columnobject.Name)).Length
-                                                    }
-
-                                                    if ($columnobject.ColumnType -eq 'xml') {
-                                                        $null
-                                                    } else {
-                                                        $faker.$($columnobject.MaskingType).String2($max, $charstring)
-                                                    }
-                                                }
-                                                default {
-                                                    $null
-                                                }
-                                            }
-                                        }
-
-                                        if (-not $newValue) {
-                                            $newValue = switch ($columnobject.MaskingType.ToLower()) {
-                                                {
-                                                    $psitem -in 'bit', 'bool'
-                                                } {
-                                                    $faker.System.Random.Bool()
-                                                }
-                                                {
-                                                    $psitem -in 'name', 'address', 'finance'
-                                                } {
-                                                    $faker.$($columnobject.MaskingType).$($columnobject.SubType)()
-                                                }
-                                                default {
-                                                    if ($max -eq -1) {
-                                                        $max = 1024
-                                                    }
-                                                    if ((Test-Bound -ParameterName ExactLength)) {
-                                                        $max = ($row.$($columnobject.Name)).ToString().Length
-                                                    }
-                                                    if ($max -eq 1) {
-                                                        $faker.System.Random.Bool()
-                                                    } else {
-                                                        try {
-                                                            $faker.$($columnobject.MaskingType).$($columnobject.SubType)()
-                                                        } catch {
-                                                            $faker.Random.String2($max, $charstring)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
                                     } catch {
-                                        Stop-Function -Message "Failure" -Target $faker -Continue -ErrorRecord $_
+
+                                        Stop-Function -Message "Failure" -Target $columnobject -Continue -ErrorRecord $_
                                     }
                                 }
 
-                                if ($columnobject.ColumnType -eq 'xml') {
-                                    # nothing, unsure how i'll handle this
+                                if ($null -eq $newValue -and $columnobject.Nullable -eq $true) {
+                                    $updates += "[$($columnobject.Name)] = NULL"
+                                } elseif ($columnobject.ColumnType -in 'bit', 'bool') {
+                                    if ($columnValue) {
+                                        $updates += "[$($columnobject.Name)] = 1"
+                                    } else {
+                                        $updates += "[$($columnobject.Name)] = 0"
+                                    }
+                                } elseif ($columnobject.ColumnType -like '*int*' -or $columnobject.ColumnType -in 'decimal') {
+                                    $updates += "[$($columnobject.Name)] = $newValue"
                                 } elseif ($columnobject.ColumnType -in 'uniqueidentifier') {
-                                    if ($null -eq $newValue -and $columnobject.Nullable) {
-                                        $updates += "[$($columnobject.Name)] = NULL"
-                                    } else {
-                                        $updates += "[$($columnobject.Name)] = '$newValue'"
-                                    }
-
-                                } elseif ($columnobject.ColumnType -match 'int') {
-                                    if ($null -eq $newValue -and $columnobject.Nullable) {
-                                        $updates += "[$($columnobject.Name)] = NULL"
-                                    } else {
-                                        $updates += "[$($columnobject.Name)] = $newValue"
-                                    }
+                                    $updates += "[$($columnobject.Name)] = '$newValue'"
+                                } elseif ($columnobject.ColumnType -eq 'datetime') {
+                                    $newValue = ([datetime]$newValue).Tostring("yyyy-MM-dd HH:mm:ss.fff")
+                                    $updates += "[$($columnobject.Name)] = '$newValue'"
+                                } elseif ($columnobject.ColumnType -eq 'datetime2') {
+                                    $newValue = ([datetime]$newValue).Tostring("yyyy-MM-dd HH:mm:ss.fffffff")
+                                    $updates += "[$($columnobject.Name)] = '$newValue'"
+                                } elseif ($columnobject.ColumnType -like 'date') {
+                                    $newValue = ([datetime]$newValue).Tostring("yyyy-MM-dd")
+                                    $updates += "[$($columnobject.Name)] = '$newValue'"
+                                } elseif ($columnobject.ColumnType -like '*date*') {
+                                    $newValue = ([datetime]$newValue).Tostring("yyyy-MM-dd HH:mm:ss")
+                                    $updates += "[$($columnobject.Name)] = '$newValue'"
+                                } elseif ($columnobject.ColumnType -like 'time') {
+                                    $newValue = ([datetime]$newValue).Tostring("HH:mm:ss.fffffff")
+                                    $updates += "[$($columnobject.Name)] = '$newValue'"
+                                } elseif ($columnobject.ColumnType -eq 'xml') {
+                                    # nothing, unsure how i'll handle this
                                 } else {
-                                    if ($null -eq $newValue -and $columnobject.Nullable) {
-                                        $updates += "[$($columnobject.Name)] = NULL"
-                                    } else {
-                                        $newValue = ($newValue).Tostring().Replace("'", "''")
-                                        $updates += "[$($columnobject.Name)] = '$newValue'"
-                                    }
-                                }
-
-                                if ($columnobject.ColumnType -notin 'xml', 'geography', 'geometry') {
-                                    if (($row.$($columnobject.Name)).GetType().Name -match 'DBNull') {
-                                        $wheres += "[$($columnobject.Name)] IS NULL"
-                                    } else {
-                                        $oldValue = ($row.$($columnobject.Name)).Tostring().Replace("'", "''")
-                                        $wheres += "[$($columnobject.Name)] = '$oldValue'"
-                                    }
+                                    $newValue = ($newValue).Tostring().Replace("'", "''")
+                                    $updates += "[$($columnobject.Name)] = '$newValue'"
                                 }
 
                                 if ($columnobject.Deterministic -and ($row.$($columnobject.Name) -notin $dictionary.Keys)) {
                                     $dictionary.Add($row.$($columnobject.Name), $newValue)
+                                }
+                            }
+
+                            $rowItems = $row | Get-Member -MemberType Properties | Select-Object Name -ExpandProperty Name
+                            foreach ($item in $rowItems) {
+                                $itemColumnType = $dbTable.Columns[$item].DataType.SqlDataType.ToString().ToLowerInvariant()
+
+                                if (($row.$($item)).GetType().Name -match 'DBNull') {
+                                    $wheres += "[$item] IS NULL"
+                                } elseif ($itemColumnType -in 'bit', 'bool') {
+                                    if ($row.$item) {
+                                        $wheres += "[$item] = 1"
+                                    } else {
+                                        $wheres += "[$item] = 0"
+                                    }
+                                } elseif ($itemColumnType -like '*int*' -or $itemColumnType -in 'decimal') {
+                                    $oldValue = $row.$item
+                                    $wheres += "[$item] = $oldValue"
+                                } elseif ($itemColumnType -in 'text', 'ntext') {
+                                    $oldValue = ($row.$item).Tostring().Replace("'", "''")
+                                    $wheres += "CAST([$item] AS VARCHAR(MAX)) = '$oldValue'"
+                                } elseif ($itemColumnType -eq 'datetime') {
+                                    $oldValue = ($row.$item).Tostring("yyyy-MM-dd HH:mm:ss.fff")
+                                    $wheres += "[$item] = '$oldValue'"
+                                } elseif ($itemColumnType -eq 'datetime2') {
+                                    $oldValue = ($row.$item).Tostring("yyyy-MM-dd HH:mm:ss.fffffff")
+                                    $wheres += "[$item] = '$oldValue'"
+                                } elseif ($itemColumnType -like 'date') {
+                                    $oldValue = ($row.$item).Tostring("yyyy-MM-dd")
+                                    $wheres += "[$item] = '$oldValue'"
+                                } elseif ($itemColumnType -like '*date*') {
+                                    $oldValue = ($row.$item).Tostring("yyyy-MM-dd HH:mm:ss")
+                                    $wheres += "[$item] = '$oldValue'"
+                                } else {
+                                    $oldValue = ($row.$item).Tostring().Replace("'", "''")
+                                    $wheres += "[$item] = '$oldValue'"
                                 }
                             }
 
@@ -471,14 +514,81 @@ function Invoke-DbaDbDataMasking {
                                 $errormessage = $_.Exception.Message.ToString()
                                 Stop-Function -Message "Error updating $($tableobject.Schema).$($tableobject.Name): $errormessage" -Target $updatequery -Continue -ErrorRecord $_
                             }
+
+                            # Increase the row number
+                            $rowNumber++
                         }
+
+                        $columnsWithComposites = @()
+                        $columnsWithComposites += $tableobject.Columns | Where-Object Composite -ne $null
+
+                        if ($columnsWithComposites.Count -ge 1) {
+                            foreach ($columnObject in $columnsWithComposites) {
+
+                                $compositeItems = @()
+
+                                foreach ($columnComposite in $columnObject.Composite) {
+                                    if ($columnComposite.Type -eq 'Column') {
+                                        $compositeItems += $columnComposite.Value
+                                    } elseif ($columnComposite.Type -eq 'Random') {
+                                        try {
+                                            $newValue = $null
+
+                                            if ($columnobject.SubType -in $supportedDataTypes) {
+                                                $newValue = Get-DbaRandomizedValue -DataType $columnobject.SubType -CharacterString $charstring -Min $columnComposite.Min -Max $columnComposite.Max -Locale $Locale
+                                            } else {
+                                                $newValue = Get-DbaRandomizedValue -RandomizerType $columnComposite.Type -RandomizerSubType $columnComposite.Subtype  -CharacterString $charstring -Min $columnComposite.Min -Max $columnComposite.Max -Locale $Locale
+                                            }
+
+                                        } catch {
+                                            Stop-Function -Message "Failure" -Target $faker -Continue -ErrorRecord $_
+                                        }
+
+                                        if ($columnobject.ColumnType -match 'int') {
+                                            $compositeItems += " $newValue"
+                                        } elseif ($columnobject.ColumnType -in 'bit', 'bool') {
+                                            if ($columnValue) {
+                                                $compositeItems += "1"
+                                            } else {
+                                                $compositeItems += "0"
+                                            }
+                                        } else {
+                                            $newValue = ($newValue).Tostring().Replace("'", "''")
+                                            $compositeItems += "'$newValue'"
+                                        }
+
+                                    } elseif ($columnComposite.Type -eq 'Static') {
+                                        $compositeItems += "'$($columnComposite.Value)'"
+                                    } else {
+                                        $compositeItems += ""
+                                    }
+                                }
+
+                                $compositeItems = $compositeItems | ForEach-Object {
+                                    $_ = "ISNULL($($_), '')"
+                                    $_
+                                }
+
+                                $updatequery = "UPDATE [$($tableobject.Schema)].[$($tableobject.Name)] SET $($columnObject.Name) = $($compositeItems -join ' + ')"
+
+                                try {
+                                    $sqlcmd = New-Object System.Data.SqlClient.SqlCommand($updatequery, $sqlconn, $transaction)
+                                    $null = $sqlcmd.ExecuteNonQuery()
+                                } catch {
+                                    Write-Message -Level VeryVerbose -Message "$updatequery"
+                                    $errormessage = $_.Exception.Message.ToString()
+                                    Stop-Function -Message "Error updating $($tableobject.Schema).$($tableobject.Name): $errormessage" -Target $updatequery -Continue -ErrorRecord $_
+                                }
+                            }
+                        }
+
                         try {
                             $null = $transaction.Commit()
                             [pscustomobject]@{
                                 ComputerName = $db.Parent.ComputerName
                                 InstanceName = $db.Parent.ServiceName
                                 SqlInstance  = $db.Parent.DomainInstanceName
-                                Database     = $db.Name
+                                Database     = $dbName
                                 Schema       = $tableobject.Schema
                                 Table        = $tableobject.Name
                                 Columns      = $tableobject.Columns.Name
@@ -490,12 +600,19 @@ function Invoke-DbaDbDataMasking {
                             Stop-Function -Message "Error updating $($tableobject.Schema).$($tableobject.Name)" -Target $updatequery -Continue -ErrorRecord $_
                         }
                     }
+
+                    # Empty the unique values array
+                    $uniqueValues = $null
+
+
+
                 }
-            }
-            try {
-                $sqlconn.Close()
-            } catch {
-                Stop-Function -Message "Failure" -Continue -ErrorRecord $_
+
+                try {
+                    $sqlconn.Close()
+                } catch {
+                    Stop-Function -Message "Failure" -Continue -ErrorRecord $_
+                }
             }
         }
     }

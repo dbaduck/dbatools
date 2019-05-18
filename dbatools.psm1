@@ -37,7 +37,7 @@ function Import-ModuleFile {
     if ($script:doDotSource) {
         . (Resolve-Path -Path $Path)
     } else {
-        $ExecutionContext.InvokeCommand.InvokeScript($false, ([scriptblock]::Create([io.file]::ReadAllText((Resolve-Path -Path $Path)))), $null, $null)
+        $ExecutionContext.InvokeCommand.InvokeScript($false, ([scriptblock]::Create([io.file]::ReadAllText((Resolve-Path -Path $Path).ProviderPath))), $null, $null)
     }
 }
 
@@ -67,7 +67,7 @@ function Write-ImportTime {
 
     if (-not $script:dbatools_ImportPerformance) { $script:dbatools_ImportPerformance = @() }
 
-    if (([System.Management.Automation.PSTypeName]'Sqlcollaborative.Dbatools.Configuration.Config').Type -eq $null) {
+    if ($null -eq ([System.Management.Automation.PSTypeName]'Sqlcollaborative.Dbatools.Configuration.Config').Type) {
         $script:dbatools_ImportPerformance += New-Object PSObject -Property @{ Time = $timestamp; Action = $Text }
     } else {
         if ([Sqlcollaborative.Dbatools.dbaSystem.DebugHost]::ImportTimeEntries.Count -eq 0) {
@@ -136,8 +136,8 @@ $script:multiFileImport = $false
 if ($dbatools_multiFileImport) { $script:multiFileImport = $true }
 if ($dbatoolsSystemSystemNode.MultiFileImport) { $script:multiFileImport = $true }
 if ($dbatoolsSystemUserNode.MultiFileImport) { $script:multiFileImport = $true }
-if (Test-Path -Path "$script:PSModuleRoot\.git") { $script:multiFileImport = $true }
-if (Test-Path -Path "$script:PSModuleRoot/.git") { $script:multiFileImport = $true }
+if ((Test-Path -Path "$script:PSModuleRoot\.git") -or $dbatools_enabledebug) { $script:multiFileImport = $true; $script:serialImport = $true }
+if ((Test-Path -Path "$script:PSModuleRoot/.git") -or $dbatools_enabledebug) { $script:multiFileImport = $true; $script:serialImport = $true }
 #endregion Multi File Import
 
 Write-ImportTime -Text "Validated defines"
@@ -149,7 +149,7 @@ if (($PSVersionTable.PSVersion.Major -le 5) -or $script:isWindows) {
 }
 
 
-$script:DllRoot = (Resolve-Path -Path "$script:PSModuleRoot\bin\")
+$script:DllRoot = (Resolve-Path -Path "$script:PSModuleRoot\bin\").ProviderPath
 
 <#
 # Removed this because it doesn't seem to work well xplat and on win7 and it doesn't provide enough value
@@ -251,7 +251,6 @@ Write-ImportTime -Text "Script: Logging"
 # Start the tepp asynchronous update system (requires the configuration system up and running)
 . Import-ModuleFile -Path (Resolve-Path -Path "$script:PSModuleRoot\internal\scripts\updateTeppAsync.ps1")
 Write-ImportTime -Text "Script: Asynchronous TEPP Cache"
-
 
 # Start the maintenance system (requires pretty much everything else already up and running)
 . Import-ModuleFile -Path (Resolve-Path -Path "$script:PSModuleRoot\internal\scripts\dbatools-maintenance.ps1")
@@ -444,10 +443,6 @@ $script:renames = @(
     @{
         "AliasName"  = "Reset-SqlSaPassword"
         "Definition" = "Reset-SqlAdmin"
-    },
-    @{
-        "AliasName"  = "Restore-SqlBackupFromDirectory"
-        "Definition" = "Restore-DbaBackupFromDirectory"
     },
     @{
         "AliasName"  = "Set-SqlMaxMemory"
@@ -1018,6 +1013,10 @@ $script:renames | ForEach-Object {
 # Leave forever
 $forever = @(
     @{
+        "AliasName"  = "Write-DbaDataTable"
+        "Definition" = "Write-DbaDbTableData"
+    },
+    @{
         "AliasName"  = "Attach-DbaDatabase"
         "Definition" = "Mount-DbaDatabase"
     },
@@ -1062,8 +1061,8 @@ $script:xplat = @(
     'Copy-DbaSysDbUserObject',
     'Copy-DbaAgentProxy',
     'Copy-DbaAgentAlert',
-    'Get-DbaDetachedDatabaseInfo',
-    'Restore-DbaBackupFromDirectory',
+    'Copy-DbaStartupProcedure',
+    'Get-DbaDbDetachedFileInfo',
     'Copy-DbaAgentJobCategory',
     'Test-DbaPath',
     'Export-DbaLogin',
@@ -1115,7 +1114,7 @@ $script:xplat = @(
     'Get-DbaServerRoleMember',
     'Resolve-DbaNetworkName',
     'Export-DbaAvailabilityGroup',
-    'Write-DbaDataTable',
+    'Write-DbaDbTableData',
     'New-DbaDbSnapshot',
     'Restore-DbaDbSnapshot',
     'Get-DbaServerTrigger',
@@ -1415,7 +1414,33 @@ $script:xplat = @(
     'Invoke-DbaDbDbccCleanTable',
     'Invoke-DbaDbDbccUpdateUsage',
     'Get-DbaDbIdentity',
-    'Set-DbaDbIdentity'
+    'Set-DbaDbIdentity',
+    'Get-DbaCmsRegServer',
+    'Get-DbaCmsRegServerStore',
+    'Add-DbaCmsRegServer',
+    'Add-DbaCmsRegServerGroup',
+    'Export-DbaCmsRegServer',
+    'Import-DbaCmsRegServer',
+    'Move-DbaCmsRegServer',
+    'Move-DbaCmsRegServerGroup',
+    'Remove-DbaCmsRegServer',
+    'Remove-DbaCmsRegServerGroup',
+    # Config system
+    'Get-DbatoolsConfig',
+    'Get-DbatoolsConfigValue',
+    'Set-DbatoolsConfig',
+    'Register-DbatoolsConfig',
+    # Data generator
+    'New-DbaDbDataGeneratorConfig',
+    'Invoke-DbaDbDataGenerator',
+    'Get-DbaRandomizedValue',
+    'Get-DbaRandomizedDatasetTemplate',
+    'Get-DbaRandomizedDataset',
+    'Get-DbaRandomizedType',
+    'Export-DbaDbTableData',
+    'Backup-DbaServiceMasterKey',
+    'Invoke-DbaDbPiiScan',
+    'New-DbaAzAccessToken'
 )
 
 $script:noncoresmo = @(
@@ -1423,10 +1448,8 @@ $script:noncoresmo = @(
     'Export-DbaUser',
     'Get-DbaSsisExecutionHistory',
     'Get-DbaRepDistributor',
-    'Get-DbaCmsRegServerStore',
     'Copy-DbaPolicyManagement',
     'Copy-DbaDataCollector',
-    'Get-DbaCmsRegServer',
     'Copy-DbaSsisCatalog',
     'New-DbaSsisCatalog',
     'Get-DbaSsisEnvironmentVariable',
@@ -1436,14 +1459,6 @@ $script:noncoresmo = @(
     'Get-DbaPbmObjectSet',
     'Get-DbaPbmPolicy',
     'Get-DbaPbmStore',
-    'Add-DbaCmsRegServer',
-    'Add-DbaCmsRegServerGroup',
-    'Export-DbaCmsRegServer',
-    'Import-DbaCmsRegServer',
-    'Move-DbaCmsRegServer',
-    'Move-DbaCmsRegServerGroup',
-    'Remove-DbaCmsRegServer',
-    'Remove-DbaCmsRegServerGroup',
     'Get-DbaRepPublication',
     'Test-DbaRepLatency',
     'Export-DbaRepServerSetting',
@@ -1474,6 +1489,8 @@ $script:windowsonly = @(
     'Test-DbaMaxMemory', # can be fixed by not testing remote when linux is detected
     'Rename-DbaDatabase', # can maybebe fixed by not remoting when linux is detected
     # CM and Windows functions
+    'Install-DbaInstance',
+    'Invoke-DbaAdvancedInstall',
     'Update-DbaInstance',
     'Invoke-DbaAdvancedUpdate',
     'Invoke-DbaPfRelog',
@@ -1577,11 +1594,6 @@ $script:windowsonly = @(
     'Find-DbaLoginInGroup',
     # 3rd party non-core DLL or exe
     'Export-DbaDacPackage', # relies on sqlpackage.exe
-    # Config system
-    'Get-DbatoolsConfig',
-    'Get-DbatoolsConfigValue',
-    'Set-DbatoolsConfig',
-    'Register-DbatoolsConfig',
     # Unknown
     'Get-DbaErrorLog',
     'Get-DbaManagementObject',
@@ -1655,6 +1667,10 @@ if (Get-Module -Name sqlserver, sqlps) {
         Write-Warning -Message 'SQLPS or SqlServer was previously imported during this session. If you encounter weird issues with dbatools, please restart PowerShell, then import dbatools without loading SQLPS or SqlServer first.'
         Write-Warning -Message 'To disable this message, type: Set-DbatoolsConfig -Name Import.SqlpsCheck -Value $false -PassThru | Register-DbatoolsConfig'
     }
+}
+
+if (-not $script:aztokens) {
+    $script:aztokens = @()
 }
 
 #endregion Post-Import Cleanup
