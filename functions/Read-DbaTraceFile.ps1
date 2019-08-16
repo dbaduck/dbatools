@@ -1,4 +1,3 @@
-#ValidationTags#Messaging,FlowControl,Pipeline,CodeStyle#
 function Read-DbaTraceFile {
     <#
     .SYNOPSIS
@@ -13,7 +12,11 @@ function Read-DbaTraceFile {
         The target SQL Server instance or instances.
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Path
         Path to the trace file. This path is relative to the SQL Server instance.
@@ -156,8 +159,7 @@ function Read-DbaTraceFile {
     #>
     [CmdletBinding()]
     param (
-        [parameter(Position = 0, Mandatory, ValueFromPipelineByPropertyName)]
-        [Alias("ServerInstance", "SqlServer")]
+        [parameter(Mandatory, ValueFromPipelineByPropertyName)]
         [DbaInstanceParameter[]]$SqlInstance,
         [parameter(ValueFromPipelineByPropertyName)]
         [PSCredential]$SqlCredential,
@@ -174,7 +176,6 @@ function Read-DbaTraceFile {
         [string[]]$ApplicationName,
         [string[]]$ObjectName,
         [string]$Where,
-        [Alias('Silent')]
         [switch]$EnableException
     )
 

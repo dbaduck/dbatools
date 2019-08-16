@@ -14,7 +14,11 @@ function Test-DbaDbRecoveryModel {
         The target SQL Server instance or instances.
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Database
         Specifies the database(s) to process. Options for this list are auto-populated from the server. If unspecified, all databases will be processed.
@@ -24,9 +28,6 @@ function Test-DbaDbRecoveryModel {
 
     .PARAMETER RecoveryModel
         Specifies the type of recovery model you wish to test. By default it will test for FULL Recovery Model.
-
-    .PARAMETER Detailed
-        Output all properties, will be deprecated in 1.0.0 release.
 
     .PARAMETER EnableException
         By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
@@ -64,27 +65,20 @@ function Test-DbaDbRecoveryModel {
 
         Shows all of the properties for the databases that have Full Recovery Model
 
-       #>
+    #>
     [CmdletBinding()]
     [OutputType("System.Collections.ArrayList")]
     param (
         [parameter(Mandatory, ValueFromPipeline)]
-        [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter[]]$SqlInstance,
-        [Alias("Databases")]
         [object[]]$Database,
         [object[]]$ExcludeDatabase,
         [PSCredential]$SqlCredential,
         [validateSet("Full", "Simple", "Bulk_Logged")]
         [object]$RecoveryModel,
-        [switch]$Detailed,
-        [Alias('Silent')]
         [switch]$EnableException
     )
     begin {
-        Test-DbaDeprecation -DeprecatedOn 1.0.0 -Parameter Detailed
-        Test-DbaDeprecation -DeprecatedOn 1.0.0 -Alias Test-DbaFullRecoveryModel
-
         if (Test-Bound -ParameterName RecoveryModel -Not) {
             $RecoveryModel = "Full"
         }
@@ -158,8 +152,5 @@ function Test-DbaDbRecoveryModel {
                 Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
         }
-    }
-    end {
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -Alias Test-DbaRecoveryModel
     }
 }

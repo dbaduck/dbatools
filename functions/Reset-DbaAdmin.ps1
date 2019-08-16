@@ -93,7 +93,6 @@ function Reset-DbaAdmin {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingWMICmdlet", "", Justification = "Using Get-WmiObject for client backwards compatibilty")]
     param (
         [Parameter(Mandatory)]
-        [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter]$SqlInstance,
         [pscredential]$SqlCredential,
         [string]$Login = "sa",
@@ -103,8 +102,6 @@ function Reset-DbaAdmin {
     )
 
     begin {
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -EnableException:$false -Alias Reset-SqlAdmin
-
         #region Utility functions
         function ConvertTo-PlainText {
             <#
@@ -152,9 +149,7 @@ function Reset-DbaAdmin {
             }
         }
         #endregion Utility functions
-        if ($Force) {
-            $ConfirmPreference = "none"
-        }
+        if ($Force) {$ConfirmPreference = 'none'}
 
         if ($SqlCredential) {
             $Login = $SqlCredential.UserName
@@ -227,7 +222,12 @@ function Reset-DbaAdmin {
             # Setup remote session if server is not local
             if (-not $instance.IsLocalHost) {
                 try {
-                    $session = New-PSSession -ComputerName $hostname -ErrorAction Stop
+                    $connectionParams = @{
+                        ComputerName = $hostname
+                        ErrorAction  = "Stop"
+                        UseSSL       = (Get-DbatoolsConfigValue -FullName 'PSRemoting.PsSession.UseSSL' -Fallback $false)
+                    }
+                    $session = New-PSSession @connectionParams
                 } catch {
                     Stop-Function -Continue -ErrorRecord $_ -Message "Can't access $hostname using PSSession. Check your firewall settings and ensure Remoting is enabled or run the script locally."
                 }
@@ -515,6 +515,6 @@ function Reset-DbaAdmin {
         }
     }
     end {
-        Write-Message -Level Verbose -Message "Script complete!"
+        Write-Message -Level Verbose -Message "Script complete."
     }
 }

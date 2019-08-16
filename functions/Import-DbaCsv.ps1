@@ -32,17 +32,21 @@ function Import-DbaCsv {
         The SQL Server Instance to import data into.
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Database
         Specifies the name of the database the CSV will be imported into. Options for this this parameter are  auto-populated from the server.
 
     .PARAMETER Schema
-        Specifies the schema in which the SQL table or view where CSV will be imported into resides. Default is dbo
+        Specifies the schema in which the SQL table or view where CSV will be imported into resides. Default is dbo.
 
-        If a schema name is not specified, and a CSV name with multiple dots is specified (ie; something.data.csv) then this will be interpreted as a request to import into a table [data] in the schema [something].
+        If a schema does not currently exist, it will be created, after a prompt to confirm this. Authorization will be set to dbo by default.
 
-        If a schema does not currently exist, it will be created, after a prompt to confirm this. Authorization will be set to dbo by default
+        This parameter overrides -UseFileNameForSchema.
 
     .PARAMETER Table
         Specifies the SQL table or view where CSV will be imported into.
@@ -75,6 +79,20 @@ function Import-DbaCsv {
 
     .PARAMETER BatchSize
         Specifies the batch size for the import. Defaults to 50000.
+
+    .PARAMETER UseFileNameForSchema
+        If this switch is enabled, the script will try to find the schema name in the input file by looking for a period (.) in the file name.
+
+        If used with the -Table parameter you may still specify the target table name. If -Table is not used the file name after the first period will
+        be used for the table name.
+
+        For example test.data.csv will import the csv contents to a table in the test schema.
+
+        If it finds one it will use the file name up to the first period as the schema. If there is no period in the filename it will default to dbo.
+
+        If a schema does not currently exist, it will be created, after a prompt to confirm this. Authorization will be set to dbo by default.
+
+        This behaviour will be overridden if the -Schema parameter is specified.
 
     .PARAMETER TableLock
         If this switch is enabled, the SqlBulkCopy option to acquire a table lock will be used. This is automatically used if -Turbo is enabled.
@@ -128,13 +146,12 @@ function Import-DbaCsv {
         You can also choose AdvanceToNextLine which basically ignores parse errors.
 
     .PARAMETER Encoding
+        By default, set to UTF-8.
+
         The encoding of the file.
 
     .PARAMETER NullValue
         The value which denotes a DbNull-value.
-
-    .PARAMETER Threshold
-        Defines the default value for Threshold indicating when the CsvReader should replace/remove consecutive null bytes.
 
     .PARAMETER MaxQuotedFieldLength
         The maxmimum length (in bytes) for any quoted field.
@@ -211,6 +228,16 @@ function Import-DbaCsv {
         Import only Name, Address and Mobile even if other columns exist. All other columns are ignored and therefore null or default values.
 
     .EXAMPLE
+        PS C:\> Import-DbaCsv -Path C:\temp\schema.data.csv -SqlInstance sql2016 -database tempdb -UseFileNameForSchema
+
+        Will import the contents of C:\temp\schema.data.csv to table 'data' in schema 'schema'.
+
+    .EXAMPLE
+        PS C:\> Import-DbaCsv -Path C:\temp\schema.data.csv -SqlInstance sql2016 -database tempdb -UseFileNameForSchema -Table testtable
+
+        Will import the contents of C:\temp\schema.data.csv to table 'testtable' in schema 'schema'.
+
+    .EXAMPLE
         PS C:\> $columns = @{
         >> Text = 'FirstName'
         >> Number = 'PhoneNumber'
@@ -220,7 +247,6 @@ function Import-DbaCsv {
         The CSV column 'Text' is inserted into SQL column 'FirstName' and CSV column Number is inserted into the SQL Column 'PhoneNumber'. All other columns are ignored and therefore null or default values.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Low')]
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "line", Justification = "Variable line is used, False Positive on line 330")]
     param (
         [parameter(ValueFromPipeline)]
         [ValidateNotNullOrEmpty()]
@@ -232,7 +258,7 @@ function Import-DbaCsv {
         [Parameter(Mandatory)]
         [string]$Database,
         [string]$Table,
-        [string]$Schema = "dbo",
+        [string]$Schema,
         [switch]$Truncate,
         [char]$Delimiter = ",",
         [switch]$SingleColumn,
@@ -249,6 +275,7 @@ function Import-DbaCsv {
         [switch]$AutoCreateTable,
         [switch]$NoProgress,
         [switch]$NoHeaderRow,
+        [switch]$UseFileNameForSchema,
         [char]$Quote = '"',
         [char]$Escape = '"',
         [char]$Comment = '#',
@@ -257,9 +284,9 @@ function Import-DbaCsv {
         [int]$BufferSize = 4096,
         [ValidateSet('AdvanceToNextLine', 'ThrowException')]
         [string]$ParseErrorAction = 'ThrowException',
-        [System.Text.Encoding]$Encoding,
+        [ValidateSet('ASCII', 'BigEndianUnicode', 'Byte', 'String', 'Unicode', 'UTF7', 'UTF8', 'Unknown')]
+        [string]$Encoding = 'UTF8',
         [string]$NullValue,
-        [int]$Threshold = 60,
         [int]$MaxQuotedFieldLength,
         [switch]$SkipEmptyLine,
         [switch]$SupportsMultiline,
@@ -270,6 +297,10 @@ function Import-DbaCsv {
     begin {
         $FirstRowHeader = $NoHeaderRow -eq $false
         $scriptelapsed = [System.Diagnostics.Stopwatch]::StartNew()
+
+        if ($PSBoundParameters.UseFileNameForSchema -and $PSBoundParameters.Schema) {
+            Write-Message -Level Warning -Message "Schema and UseFileNameForSchema parameters both specified. UseSchemaInFileName will be ignored."
+        }
 
         try {
             # SilentContinue isn't enough
@@ -304,7 +335,7 @@ function Import-DbaCsv {
                 [System.Data.SqlClient.SqlTransaction]$transaction
             )
             $reader = New-Object LumenWorks.Framework.IO.Csv.CsvReader(
-                (New-Object System.IO.StreamReader($Path)),
+                (New-Object System.IO.StreamReader($Path, [System.Text.Encoding]::$Encoding)),
                 $FirstRowHeader,
                 $Delimiter,
                 $Quote,
@@ -319,7 +350,7 @@ function Import-DbaCsv {
             $reader.Dispose()
 
             # Get SQL datatypes by best guess on first data row
-            $sqldatatypes = @(); $index = 0
+            $sqldatatypes = @();
 
             foreach ($column in $Columns) {
                 $sqldatatypes += "[$column] varchar(MAX)"
@@ -397,10 +428,36 @@ function Import-DbaCsv {
                 }
             }
 
-            # Automatically generate Table name if not specified, then prompt user to confirm
-            if (-not (Test-Bound -ParameterName Table)) {
-                $table = [IO.Path]::GetFileNameWithoutExtension($file)
-                Write-Message -Level Verbose -Message "Table name not specified, using $table"
+            # Automatically generate Table name if not specified
+            if (-not $PSBoundParameters.Table) {
+                $filename = [IO.Path]::GetFileNameWithoutExtension($file)
+
+                if ($filename.IndexOf('.') -ne -1) { $periodFound = $true }
+
+                if ($UseFileNameForSchema -and $periodFound -and -not $PSBoundParameters.Schema) {
+                    $table = $filename.Remove(0, $filename.IndexOf('.') + 1)
+                    Write-Message -Level Verbose -Message "Table name not specified, using $table from file name"
+                } else {
+                    $table = [IO.Path]::GetFileNameWithoutExtension($file)
+                    Write-Message -Level Verbose -Message "Table name not specified, using $table"
+                }
+            }
+
+            # Use dbo as schema name if not specified in parms, or as first string before a period in filename
+            if (-not ($PSBoundParameters.Schema)) {
+                if ($UseFileNameForSchema) {
+                    $filename = [IO.Path]::GetFileNameWithoutExtension($file)
+                    if ($filename.IndexOf('.') -eq -1) {
+                        $schema = "dbo"
+                        Write-Message -Level Verbose -Message "Schema not specified, and not found in file name, using dbo"
+                    } else {
+                        $schema = $filename.SubString(0, $filename.IndexOf('.'))
+                        Write-Message -Level Verbose -Message "Schema detected in filename, using $schema"
+                    }
+                } else {
+                    $schema = 'dbo'
+                    Write-Message -Level Verbose -Message "Schema not specified, using dbo"
+                }
             }
 
             foreach ($instance in $SqlInstance) {
@@ -500,7 +557,7 @@ function Import-DbaCsv {
                 foreach ($option in $options) {
                     $optionValue = Get-Variable $option -ValueOnly -ErrorAction SilentlyContinue
                     if ($optionValue -eq $true) {
-                        $bulkCopyOptions = $bulkCopyOptions -bor (Invoke-Expression "[System.Data.SqlClient.SqlBulkCopyOptions]::$option")
+                        $bulkCopyOptions += $([System.Data.SqlClient.SqlBulkCopyOptions]::$option).value__
                     }
                 }
 
@@ -554,7 +611,7 @@ function Import-DbaCsv {
                     # Write to server :D
                     try {
                         $reader = New-Object LumenWorks.Framework.IO.Csv.CsvReader(
-                            (New-Object System.IO.StreamReader($file)),
+                            (New-Object System.IO.StreamReader($file, [System.Text.Encoding]::$Encoding)),
                             $FirstRowHeader,
                             $Delimiter,
                             $Quote,
@@ -565,25 +622,19 @@ function Import-DbaCsv {
                             $NullValue
                         )
 
-                        if (Test-Bound -ParameterName Encoding) {
-                            $reader.Encoding = $Encoding
-                        }
-                        if (Test-Bound -ParameterName Threshold) {
-                            $reader.Threshold = $Threshold
-                        }
-                        if (Test-Bound -ParameterName MaxQuotedFieldLength) {
+                        if ($PSBoundParameters.MaxQuotedFieldLength) {
                             $reader.MaxQuotedFieldLength = $MaxQuotedFieldLength
                         }
-                        if (Test-Bound -ParameterName SkipEmptyLine) {
+                        if ($PSBoundParameters.SkipEmptyLine) {
                             $reader.SkipEmptyLines = $SkipEmptyLine
                         }
-                        if (Test-Bound -ParameterName SupportsMultiline) {
+                        if ($PSBoundParameters.SupportsMultiline) {
                             $reader.SupportsMultiline = $SupportsMultiline
                         }
-                        if (Test-Bound -ParameterName UseColumnDefault) {
+                        if ($PSBoundParameters.UseColumnDefault) {
                             $reader.UseColumnDefaults = $UseColumnDefault
                         }
-                        if (Test-Bound -ParameterName ParseErrorAction) {
+                        if ($PSBoundParameters.ParseErrorAction) {
                             $reader.DefaultParseErrorAction = $ParseErrorAction
                         }
 
@@ -674,8 +725,5 @@ function Import-DbaCsv {
         # Script is finished. Show elapsed time.
         $totaltime = [math]::Round($scriptelapsed.Elapsed.TotalSeconds, 2)
         Write-Message -Level Verbose -Message "Total Elapsed Time for everything: $totaltime seconds"
-
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -Alias Import-DbaCsvtoSql
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -EnableException:$false -Alias Import-CsvToSql
     }
 }

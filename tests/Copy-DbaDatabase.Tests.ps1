@@ -128,7 +128,7 @@ Describe "$commandname Integration Tests" -Tag "IntegrationTests" {
             Get-DbaProcess -SqlInstance $script:instance2, $script:instance3 -Program 'dbatools PowerShell module - dbatools.io' | Stop-DbaProcess -WarningAction SilentlyContinue
             Remove-DbaDatabase -Confirm:$false -SqlInstance $script:instance3 -Database $backuprestoredb
             #Pre-stage the restore
-            $null = Get-DbaBackupHistory -SqlInstance $script:instance2 -Database $backuprestoredb -LastFull | Restore-DbaDatabase -SqlInstance $script:instance3 -DatabaseName $backuprestoredb -NoRecovery 3>$null
+            $null = Get-DbaDbBackupHistory -SqlInstance $script:instance2 -Database $backuprestoredb -LastFull | Restore-DbaDatabase -SqlInstance $script:instance3 -DatabaseName $backuprestoredb -NoRecovery 3>$null
             #Run diff now
             $null = Backup-DbaDatabase -SqlInstance $script:instance2 -Database $backuprestoredb -BackupDirectory $NetworkPath -Type Diff
         }
@@ -203,7 +203,7 @@ Describe "$commandname Integration Tests" -Tag "IntegrationTests" {
             ($files.PhysicalName -like "*$prefix$backuprestoredb*").count | Should -Be $files.count
         }
 
-        $null = Restore-DbaDatabase -SqlInstance $script:instance2 -path $script:appveyorlabrepo\RestoreTimeClean -useDestinationDefaultDirectories
+        $null = Restore-DbaDatabase -SqlInstance $script:instance2 -path $script:appveyorlabrepo\RestoreTimeClean2016 -useDestinationDefaultDirectories
         It "Should warn and exit if newname and >1 db specified" {
             $prefix = "copy$(Get-Random)"
             $results = Copy-DbaDatabase -Source $script:instance2 -Destination $script:instance3 -Database $backuprestoredb, RestoreTimeClean -DetachAttach -Reattach -NewName warn -WarningVariable warnvar

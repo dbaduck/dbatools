@@ -16,7 +16,11 @@ function Invoke-DbaDiagnosticQuery {
         The target SQL Server instance or instances. Can be either a string or SMO server
 
     .PARAMETER SqlCredential
-        Allows alternative Windows or SQL login credentials to be used
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Path
         Alternate path for the diagnostic scripts
@@ -133,7 +137,6 @@ function Invoke-DbaDiagnosticQuery {
     [outputtype([pscustomobject[]])]
     param (
         [parameter(Mandatory, ValueFromPipeline, Position = 0)]
-        [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter[]]$SqlInstance,
 
         [Alias('DatabaseName')]
@@ -157,7 +160,7 @@ function Invoke-DbaDiagnosticQuery {
         [string]$OutputPath,
         [switch]$ExportQueries,
 
-        [switch][Alias('Silent')]
+        [switch]
         [switch]$EnableException
     )
 
@@ -177,11 +180,8 @@ function Invoke-DbaDiagnosticQuery {
 
         Write-Message -Level Verbose -Message "Interpreting DMV Script Collections"
 
-        $module = Get-Module -Name dbatools
-        $base = $module.ModuleBase
-
         if (!$Path) {
-            $Path = "$base\bin\diagnosticquery"
+            $Path = "$script:PSModuleRoot\bin\diagnosticquery"
         }
 
         $scriptversions = @()
@@ -306,7 +306,7 @@ function Invoke-DbaDiagnosticQuery {
 
 
             }
-            
+
             foreach ($scriptpart in $parsedscript) {
                 # ensure results are null with each part, otherwise duplicated information may be returned
                 $result = $null

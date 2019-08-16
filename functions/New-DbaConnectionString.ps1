@@ -18,7 +18,11 @@ function New-DbaConnectionString {
         The target SQL Server instance or instances.
 
     .PARAMETER Credential
-        Credential object used to connect to the SQL Server as a different user be it Windows or SQL Server. Windows users are determined by the existence of a backslash, so if you are intending to use an alternative Windows connection instead of a SQL login, ensure it contains a backslash.
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance. be it Windows or SQL Server. Windows users are determined by the existence of a backslash, so if you are intending to use an alternative Windows connection instead of a SQL login, ensure it contains a backslash.
 
     .PARAMETER AccessToken
         Basically tells the connection string to ignore authentication. Does not include the AccessToken in the resulting connecstring.
@@ -277,15 +281,11 @@ function New-DbaConnectionString {
 
                             if ($username -like "*\*") {
                                 $username = $username.Split("\")[1]
-                                #Variable marked as unused by PSScriptAnalyzer
-                                #$authtype = "Windows Authentication with Credential"
                                 $server.ConnectionContext.LoginSecure = $true
                                 $server.ConnectionContext.ConnectAsUser = $true
                                 $server.ConnectionContext.ConnectAsUserName = $username
                                 $server.ConnectionContext.ConnectAsUserPassword = ($Credential).GetNetworkCredential().Password
                             } else {
-                                #Variable marked as unused by PSScriptAnalyzer
-                                #$authtype = "SQL Authentication"
                                 $server.ConnectionContext.LoginSecure = $false
                                 $server.ConnectionContext.set_Login($username)
                                 $server.ConnectionContext.set_SecurePassword($Credential.Password)
@@ -324,8 +324,5 @@ function New-DbaConnectionString {
                 }
             }
         }
-    }
-    end {
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -EnableException:$false -Alias New-DbaSqlConnectionString
     }
 }

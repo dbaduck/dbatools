@@ -88,12 +88,11 @@ function New-DbaMessageLevelModifier {
         [string[]]
         $ExcludeTags,
 
-        [switch]
-        $EnableException
+        [switch]$EnableException
     )
 
     if (Test-Bound -ParameterName IncludeFunctionName, ExcludeFunctionName, IncludeModuleName, ExcludeModuleName, IncludeTags, ExcludeTags -Not) {
-        Stop-Function -Message "Must specify at least one condition in order to apply message level modifier!" -EnableException $EnableException -Category InvalidArgument
+        Stop-Function -Message "Must specify at least one condition in order to apply message level modifier." -EnableException $EnableException -Category InvalidArgument
         return
     }
 

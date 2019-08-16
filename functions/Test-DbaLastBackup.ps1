@@ -22,10 +22,18 @@ function Test-DbaLastBackup {
         If a different Destination server is specified, you must ensure that the database backups are on a shared location
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER DestinationCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Database
         The database backups to test. If -Database is not provided, all database backups will be tested.
@@ -157,7 +165,6 @@ function Test-DbaLastBackup {
         [switch]$NoDrop,
         [switch]$CopyFile,
         [string]$CopyPath,
-        [Alias("MaxMB")]
         [int]$MaxSize,
         [switch]$IncludeCopyOnly,
         [switch]$IgnoreLogBackup,
@@ -166,9 +173,6 @@ function Test-DbaLastBackup {
         [Microsoft.SqlServer.Management.Smo.Database[]]$InputObject,
         [switch]$EnableException
     )
-    begin {
-        Test-DbaDeprecation -DeprecatedOn "1.0" -Parameter 'MaxMB'
-    }
     process {
         if ($SqlInstance) {
             $InputObject += Get-DbaDatabase -SqlInstance $SqlInstance -SqlCredential $SqlCredential -Database $Database -ExcludeDatabase $ExcludeDatabase
@@ -191,7 +195,7 @@ function Test-DbaLastBackup {
                 $DestinationCredential = $SqlCredential
             }
 
-            if ($db.LastFullBackup -eq 'Monday, January 1, 0001 12:00:00 AM') {
+            if ($db.LastFullBackup.Year -eq 1) {
                 [pscustomobject]@{
                     SourceServer   = $source
                     TestServer     = $destination
@@ -275,13 +279,13 @@ function Test-DbaLastBackup {
             if (Test-Bound "IgnoreLogBackup") {
                 Write-Message -Level Verbose -Message "Skipping Log backups as requested."
                 $lastbackup = @()
-                $lastbackup += $full = Get-DbaBackupHistory -SqlInstance $sourceserver -Database $dbname -IncludeCopyOnly:$IncludeCopyOnly -LastFull -WarningAction SilentlyContinue
-                $diff = Get-DbaBackupHistory -SqlInstance $sourceserver -Database $dbname -IncludeCopyOnly:$IncludeCopyOnly -LastDiff -WarningAction SilentlyContinue
+                $lastbackup += $full = Get-DbaDbBackupHistory -SqlInstance $sourceserver -Database $dbname -IncludeCopyOnly:$IncludeCopyOnly -LastFull -WarningAction SilentlyContinue
+                $diff = Get-DbaDbBackupHistory -SqlInstance $sourceserver -Database $dbname -IncludeCopyOnly:$IncludeCopyOnly -LastDiff -WarningAction SilentlyContinue
                 if ($full.start -le $diff.start) {
                     $lastbackup += $diff
                 }
             } else {
-                $lastbackup = Get-DbaBackupHistory -SqlInstance $sourceserver -Database $dbname -IncludeCopyOnly:$IncludeCopyOnly -Last -WarningAction SilentlyContinue
+                $lastbackup = Get-DbaDbBackupHistory -SqlInstance $sourceserver -Database $dbname -IncludeCopyOnly:$IncludeCopyOnly -Last -WarningAction SilentlyContinue
             }
 
             if (-not $lastbackup) {
@@ -363,7 +367,7 @@ function Test-DbaLastBackup {
                 $success = $restoreresult = $dbccresult = "Skipped"
             }
             if ($restoreresult -ne "Skipped" -or $lastbackup[0].Path -like 'http*') {
-                Write-Message -Level Verbose -Message "Looking good!"
+                Write-Message -Level Verbose -Message "Looking good."
 
                 $fileexists = $true
                 $ogdbname = $dbname

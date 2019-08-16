@@ -1,4 +1,3 @@
-#ValidationTags#CodeStyle,Messaging,FlowControl,Pipeline#
 function Get-DbaFilestream {
     <#
     .SYNOPSIS
@@ -14,7 +13,11 @@ function Get-DbaFilestream {
         The target SQL Server instance or instances. Defaults to localhost.
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Credential
         Login to the target Windows server using alternative credentials.
@@ -43,7 +46,7 @@ function Get-DbaFilestream {
         PS C:\> Get-DbaFilestream -SqlInstance server1\instance2 -SqlCredential sqladmin
 
         Prompts for the password to the SQL Login "sqladmin" then returns the status of Filestream configuration for the service and instance server1\instance2
-       #>
+    #>
     [CmdletBinding()]
     param (
         [parameter(ValueFromPipeline)]
@@ -125,7 +128,7 @@ function Get-DbaFilestream {
             $servicelevel = [int]$serviceFS.AccessLevel
 
             [PsCustomObject]@{
-                ComputerName        = $server.NetName
+                ComputerName        = $server.ComputerName
                 InstanceName        = $server.ServiceName
                 SqlInstance         = $server.DomainInstanceName
                 InstanceAccess      = $idInstanceFS[$runvalue]

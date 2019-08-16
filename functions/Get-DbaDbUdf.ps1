@@ -10,7 +10,11 @@ function Get-DbaDbUdf {
         The target SQL Server instance or instances
 
     .PARAMETER SqlCredential
-        Allows you to login to SQL Server using alternative credentials
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Database
         To get User Defined Functions from specific database(s)
@@ -63,13 +67,11 @@ function Get-DbaDbUdf {
     [CmdletBinding()]
     param (
         [parameter(Mandatory, ValueFromPipeline)]
-        [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter[]]$SqlInstance,
         [PSCredential]$SqlCredential,
         [object[]]$Database,
         [object[]]$ExcludeDatabase,
         [switch]$ExcludeSystemUdf,
-        [Alias('Silent')]
         [switch]$EnableException
     )
 
@@ -113,9 +115,5 @@ function Get-DbaDbUdf {
                 }
             }
         }
-    }
-
-    end {
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -EnableException:$false -Alias Get-DbaDatabaseUdf
     }
 }

@@ -10,7 +10,11 @@ function Publish-DbaDacPackage {
         The target SQL Server instance or instances.
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Path
         Specifies the filesystem path to the DACPAC
@@ -92,7 +96,7 @@ function Publish-DbaDacPackage {
     .EXAMPLE
         PS C:\> $loc = "C:\Users\bob\source\repos\Microsoft.Data.Tools.Msbuild\lib\net46\Microsoft.SqlServer.Dac.dll"
         PS C:\> Publish-DbaDacPackage -SqlInstance "local" -Database WideWorldImporters -Path C:\temp\WideWorldImporters.dacpac -PublishXml C:\temp\WideWorldImporters.publish.xml -DacFxPath $loc -Confirm
-    
+
         Publishes the dacpac using a specific dacfx library. Prompts for confirmation.
 
     .EXAMPLE
@@ -107,9 +111,7 @@ function Publish-DbaDacPackage {
     #>
     [CmdletBinding(DefaultParameterSetName = 'Obj', SupportsShouldProcess, ConfirmImpact = 'Medium')]
     param (
-        [Alias("ServerInstance", "SqlServer")]
         [DbaInstance[]]$SqlInstance,
-        [Alias("Credential")]
         [PSCredential]$SqlCredential,
         [Parameter(Mandatory, ValueFromPipelineByPropertyName)]
         [string]$Path,
@@ -206,13 +208,13 @@ function Publish-DbaDacPackage {
         }
 
         if (-not (Test-Path -Path $Path)) {
-            Stop-Function -Message "$Path not found!"
+            Stop-Function -Message "$Path not found."
             return
         }
 
         if ($PsCmdlet.ParameterSetName -eq 'Xml') {
             if (-not (Test-Path -Path $PublishXml)) {
-                Stop-Function -Message "$PublishXml not found!"
+                Stop-Function -Message "$PublishXml not found."
                 return
             }
         }
@@ -373,8 +375,5 @@ function Publish-DbaDacPackage {
                 }
             }
         }
-    }
-    end {
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -EnableException:$false -Alias Publish-DbaDacpac
     }
 }

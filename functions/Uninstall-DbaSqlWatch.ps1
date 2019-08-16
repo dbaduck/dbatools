@@ -1,4 +1,3 @@
-#ValidationTags#CodeStyle,Messaging,FlowControl,Pipeline#
 Function Uninstall-DbaSqlWatch {
     <#
     .SYNOPSIS
@@ -11,7 +10,11 @@ Function Uninstall-DbaSqlWatch {
         SQL Server name or SMO object representing the SQL Server to connect to.
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Database
         Specifies the database to install SqlWatch into. Defaults to master.
@@ -42,7 +45,7 @@ Function Uninstall-DbaSqlWatch {
         Uninstall-DbaSqlWatch -SqlInstance server1
 
         Deletes all user objects, agent jobs, and historical data associated with SqlWatch from the master database.
-       #>
+    #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = "Low")]
     param (
         [Parameter(Mandatory, ValueFromPipeline)]

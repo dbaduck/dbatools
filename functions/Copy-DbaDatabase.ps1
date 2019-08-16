@@ -14,7 +14,11 @@ function Copy-DbaDatabase {
         Source SQL Server.
 
     .PARAMETER SourceSqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Destination
         Destination SQL Server. You may specify multiple servers.
@@ -24,7 +28,11 @@ function Copy-DbaDatabase {
         When using -DetachAttach with multiple servers, -Reattach must be specified.
 
     .PARAMETER DestinationSqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Database
         Migrates only specified databases. This list is auto-populated from the server for tab completion. Multiple databases may be specified as a collection.
@@ -180,15 +188,15 @@ function Copy-DbaDatabase {
 
         Migrates Mydb from instance sql2014 to AzureDb on the specified Azure SQL Manage Instance, replacing the existing AzureDb if it exists, using the blob storage account https://someblob.blob.core.windows.net/sql using the Sql Server Credential AzBlobCredential
     #>
-    [CmdletBinding(DefaultParameterSetName = "DbBackup", SupportsShouldProcess)]
+    [CmdletBinding(DefaultParameterSetName = "DbBackup", SupportsShouldProcess, ConfirmImpact = "Medium")]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseOutputTypeCorrectly", "", Justification = "PSSA Rule Ignored by BOH")]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPassword", "AzureCredential", Justification = "Unfortunate variable name that doesn't hold a password")]
     param (
         [DbaInstanceParameter]$Source,
         [PSCredential]$SourceSqlCredential,
         [parameter(Mandatory)]
         [DbaInstanceParameter[]]$Destination,
         [PSCredential]$DestinationSqlCredential,
-        [Alias("Databases")]
         [object[]]$Database,
         [object[]]$ExcludeDatabase,
         [Alias("All")]
@@ -197,7 +205,6 @@ function Copy-DbaDatabase {
         [switch]$AllDatabases,
         [parameter(Mandatory, ParameterSetName = "DbBackup")]
         [switch]$BackupRestore,
-        [Alias("NetworkShare")]
         [parameter(ParameterSetName = "DbBackup",
             HelpMessage = "Specify a valid network share in the format \\server\share that can be accessed by your account and the SQL Server service accounts for both Source and Destination.")]
         [string]$SharedPath,
@@ -239,8 +246,6 @@ function Copy-DbaDatabase {
         [switch]$EnableException
     )
     begin {
-        Test-DbaDeprecation -DeprecatedOn 1.0.0 -Parameter NetworkShare -CustomMessage "Using the parameter NetworkShare is deprecated. This parameter will be removed in version 1.0.0 or before. Use SharedPath instead."
-
         $CopyOnly = -not $NoCopyOnly
 
         if ($BackupRestore -and (-not $SharedPath -and -not $UseLastBackup)) {
@@ -263,6 +268,8 @@ function Copy-DbaDatabase {
             Stop-Function -Message "-Continue cannot be used without -UseLastBackup"
             return
         }
+
+        if ($Force) {$ConfirmPreference = 'none'}
 
         function Join-Path {
             <#
@@ -1173,7 +1180,7 @@ function Copy-DbaDatabase {
                         }
                         If ($Pscmdlet.ShouldProcess($destinstance, $whatifmsg)) {
                             if ($UseLastBackup) {
-                                $backupTmpResult = Get-DbaBackupHistory -SqlInstance $sourceServer -Database $dbName -IncludeCopyOnly -Last
+                                $backupTmpResult = Get-DbaDbBackupHistory -SqlInstance $sourceServer -Database $dbName -IncludeCopyOnly -Last
                                 if (-not $backupTmpResult) {
                                     $copyDatabaseStatus.Type = "Database (BackupRestore)"
                                     $copyDatabaseStatus.Status = "Failed"
@@ -1268,18 +1275,30 @@ function Copy-DbaDatabase {
                             }
                         }
 
+                        if ($SetSourceReadOnly) {
+                            If ($Pscmdlet.ShouldProcess($destServer.Name, "Set $dbName to read-write after source was set to read only")) {
+                                try {
+                                    $null = Set-DbaDbState -SqlInstance $destServer -Database $dbName -ReadWrite -EnableException -Force
+                                } catch {
+                                    Stop-Function -Message "Couldn't set $dbName to read-write on $($destserver.Name)" -ErrorRecord $_
+                                }
+                            }
+                        }
+
                         $dbFinish = Get-Date
                         if ($NoRecovery -eq $false) {
-                            # needed because the newly restored database doesn't show up
-                            $destServer.Databases.Refresh()
-                            $dbOwner = $sourceServer.Databases[$dbName].Owner
-                            if ($null -eq $dbOwner -or $destServer.Logins.Name -notcontains $dbOwner) {
-                                $dbOwner = Get-SaLoginName -SqlInstance $destServer
-                            }
-                            Write-Message -Level Verbose -Message "Updating database owner to $dbOwner."
-                            $OwnerResult = Set-DbaDbOwner -SqlInstance $destServer -Database $dbName -TargetLogin $dbOwner -EnableException
-                            if ($OwnerResult.Length -eq 0) {
-                                Write-Message -Level Verbose -Message "Failed to update database owner."
+                            If ($Pscmdlet.ShouldProcess($destServer.Name, "Setting db owner to $dbowner for $dbName")) {
+                                # needed because the newly restored database doesn't show up
+                                $destServer.Databases.Refresh()
+                                $dbOwner = $sourceServer.Databases[$dbName].Owner
+                                if ($null -eq $dbOwner -or $destServer.Logins.Name -notcontains $dbOwner) {
+                                    $dbOwner = Get-SaLoginName -SqlInstance $destServer
+                                }
+                                try {
+                                    $null = $destServer.Query("ALTER DATABASE [$dbname] SET READ_WRITE")
+                                } catch {
+                                    Stop-Function -Message "Failure setting $dbname to read-write on destination server" -ErrorRecord $_
+                                }
                             }
                         }
                     }
@@ -1466,6 +1485,5 @@ function Copy-DbaDatabase {
         } else {
             Write-Message -Level Verbose -Message "No work was done, as we stopped during setup phase"
         }
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -EnableException:$false -Alias Copy-SqlDatabase
     }
 }

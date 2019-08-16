@@ -1,4 +1,3 @@
-#ValidationTags#Messaging,FlowControl,Pipeline,CodeStyle#
 function New-DbaComputerCertificate {
     <#
     .SYNOPSIS
@@ -112,7 +111,6 @@ function New-DbaComputerCertificate {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseOutputTypeCorrectly", "", Justification = "PSSA Rule Ignored by BOH")]
     param (
         [parameter(ValueFromPipeline)]
-        [Alias("ServerInstance", "SqlServer", "SqlInstance")]
         [DbaInstance[]]$ComputerName = $env:COMPUTERNAME,
         [PSCredential]$Credential,
         [string]$CaServer,
@@ -127,12 +125,11 @@ function New-DbaComputerCertificate {
         [string]$Folder = "My",
         [string[]]$Dns,
         [switch]$SelfSigned,
-        [Alias('Silent')]
         [switch]$EnableException
     )
     begin {
         $englishCodes = 9, 1033, 2057, 3081, 4105, 5129, 6153, 7177, 8201, 9225
-        if ($englishCodes -notcontains (Get-DbaCmObject Win32_OperatingSystem).OSLanguage) {
+        if ($englishCodes -notcontains (Get-DbaCmObject -ClassName Win32_OperatingSystem).OSLanguage) {
             Stop-Function -Message "Currently, this command is only supported in English OS locales. OS Locale detected: $([System.Globalization.CultureInfo]::GetCultureInfo([int](Get-DbaCmObject Win32_OperatingSystem).OSLanguage).DisplayName)`nWe apologize for the inconvenience and look into providing universal language support in future releases."
             return
         }

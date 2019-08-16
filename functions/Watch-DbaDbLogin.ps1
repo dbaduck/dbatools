@@ -24,7 +24,11 @@ function Watch-DbaDbLogin {
         The name of the Watch table. By default, this is DbaTools-WatchDbLogins.
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER EnableException
         By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
@@ -62,7 +66,6 @@ function Watch-DbaDbLogin {
     [CmdletBinding(DefaultParameterSetName = "Default")]
     param (
         [parameter(Mandatory)]
-        [Alias("ServerInstance", "SqlServer")]
         [DbaInstance]$SqlInstance,
         [object]$Database,
         [string]$Table = "DbaTools-WatchDbLogins",
@@ -73,7 +76,6 @@ function Watch-DbaDbLogin {
 
         # File with one server per line
         [string]$ServersFromFile,
-        [Alias('Silent')]
         [switch]$EnableException
     )
 
@@ -97,7 +99,7 @@ function Watch-DbaDbLogin {
         #>
         if ($SqlCms) {
             try {
-                $servers = Get-DbaCmsRegServerName -SqlInstance $SqlCms -SqlCredential $SqlCredential -EnableException
+                $servers = Get-DbaRegServerName -SqlInstance $SqlCms -SqlCredential $SqlCredential -EnableException
             } catch {
                 Stop-Function -Message "The CMS server, $SqlCms, was not accessible." -Target $SqlCms -ErrorRecord $_
                 return
@@ -153,8 +155,5 @@ function Watch-DbaDbLogin {
                 Write-Message -Level Verbose -Message "No data returned for $instance."
             }
         }
-    }
-    end {
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -EnableException:$false -Alias Watch-SqlDbLogin
     }
 }

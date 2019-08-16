@@ -1,4 +1,3 @@
-#ValidationTags#Messaging,FlowControl,Pipeline,CodeStyle#
 function Get-DbaBackupInformation {
     <#
     .SYNOPSIS
@@ -27,7 +26,11 @@ function Get-DbaBackupInformation {
         The SQL Server instance to be used to read the headers of the backup files
 
     .PARAMETER SqlCredential
-        Allows you to login to servers using SQL Logins as opposed to Windows Auth/Integrated/Trusted.
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER DatabaseName
         An array of Database Names to filter by. If empty all databases are returned.
@@ -129,7 +132,6 @@ function Get-DbaBackupInformation {
         [parameter(Mandatory, ValueFromPipeline)]
         [object[]]$Path,
         [parameter(Mandatory, ParameterSetName = "Create")]
-        [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter]$SqlInstance,
         [parameter(ParameterSetName = "Create")]
         [PSCredential]$SqlCredential,

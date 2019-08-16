@@ -10,7 +10,11 @@ function Show-DbaDbList {
         The target SQL Server instance or instances..
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Title
         Title of the window being displayed. Default is "Select Database".
@@ -58,7 +62,6 @@ function Show-DbaDbList {
     [CmdletBinding()]
     param (
         [parameter(Mandatory, ValueFromPipeline)]
-        [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter]$SqlInstance,
         [PSCredential]$SqlCredential,
         [string]$Title = "Select Database",
@@ -211,8 +214,5 @@ function Show-DbaDbList {
         if ($script:selected.length -gt 0 -and $script:okay -eq $true) {
             return $script:selected
         }
-
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -EnableException:$false -Alias Show-SqlDatabaseList
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -EnableException:$false -Alias Show-DbaDatabaseList
     }
 }

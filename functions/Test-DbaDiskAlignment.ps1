@@ -25,7 +25,11 @@ function Test-DbaDiskAlignment {
         $cred = Get-Credential, then pass $cred object to the -Credential parameter.
 
     .PARAMETER SQLCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER NoSqlCheck
         If this switch is enabled, the disk(s) will not be checked for SQL Server data or log files.
@@ -74,7 +78,6 @@ function Test-DbaDiskAlignment {
     #>
     param (
         [parameter(Mandatory, ValueFromPipeline)]
-        [Alias("ServerInstance", "SqlServer", "SqlInstance")]
         [DbaInstanceParameter[]]$ComputerName,
         [System.Management.Automation.PSCredential]$Credential,
         [System.Management.Automation.PSCredential]$SqlCredential,
@@ -82,8 +85,6 @@ function Test-DbaDiskAlignment {
         [switch]$EnableException
     )
     begin {
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -Parameter 'Detailed'
-
         $sessionoption = New-CimSessionOption -Protocol DCom
 
         function Get-DiskAlignment {
@@ -258,8 +259,8 @@ function Test-DbaDiskAlignment {
 
     process {
         # uses cim commands
-        
-        
+
+
         foreach ($computer in $ComputerName) {
             $computer = $ogcomputer = $computer.ComputerName
             Write-Message -Level VeryVerbose -Message "Processing: $computer."

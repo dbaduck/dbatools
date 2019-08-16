@@ -1,4 +1,3 @@
-#ValidationTags#Messaging,FlowControl,Pipeline,CodeStyle#
 function Set-DbaAgentSchedule {
     <#
     .SYNOPSIS
@@ -11,7 +10,11 @@ function Set-DbaAgentSchedule {
         The target SQL Server instance or instances. You must have sysadmin access and server version must be SQL Server version 2000 or greater.
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Job
         The name of the job that has the schedule.
@@ -124,7 +127,6 @@ function Set-DbaAgentSchedule {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = "Low")]
     param (
         [parameter(Mandatory, ValueFromPipeline)]
-        [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter[]]$SqlInstance,
         [PSCredential]$SqlCredential,
         [Parameter(Mandatory, ValueFromPipeline)]
@@ -149,12 +151,12 @@ function Set-DbaAgentSchedule {
         [string]$EndDate,
         [string]$StartTime,
         [string]$EndTime,
-        [Alias('Silent')]
         [switch]$EnableException,
         [switch]$Force
     )
 
     begin {
+        if ($Force) {$ConfirmPreference = 'none'}
 
         # Check of the FrequencyType value is of type string and set the integer value
         if ($FrequencyType -notin 0, 1, 4, 8, 16, 32, 64, 128) {
@@ -167,7 +169,7 @@ function Set-DbaAgentSchedule {
         }
 
         # Check if the interval is valid
-        if ($null = $FrequencyInterval -and ($FrequencyType -eq 4) -and ($FrequencyInterval -lt 1 -or $FrequencyInterval -ge 365)) {
+        if ($null -eq $FrequencyInterval -and ($FrequencyType -eq 4) -and ($FrequencyInterval -lt 1 -or $FrequencyInterval -ge 365)) {
             Stop-Function -Message "The interval $FrequencyInterval needs to be higher than 1 and lower than 365 when using a daily frequency the interval." -Target $SqlInstance
             return
         }
@@ -313,7 +315,7 @@ function Set-DbaAgentSchedule {
 
         if (Test-FunctionInterrupt) { return }
 
-        foreach ($instance in $sqlinstance) {
+        foreach ($instance in $SqlInstance) {
 
             foreach ($j in $Job) {
 

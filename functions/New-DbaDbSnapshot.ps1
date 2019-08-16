@@ -1,4 +1,3 @@
-#ValidationTags#Messaging,FlowControl,Pipeline,CodeStyle#
 function New-DbaDbSnapshot {
     <#
     .SYNOPSIS
@@ -11,7 +10,11 @@ function New-DbaDbSnapshot {
         The target SQL Server instance or instances.
 
     .PARAMETER SqlCredential
-        Credential object used to connect to the SQL Server as a different user
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER AllDatabases
         Creates snapshot for all eligible databases
@@ -92,13 +95,10 @@ function New-DbaDbSnapshot {
 
     #>
 
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = "Medium")]
     param (
-        [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter[]]$SqlInstance,
-        [Alias("Credential")]
         [PSCredential]$SqlCredential,
-        [Alias("Databases")]
         [object[]]$Database,
         [object[]]$ExcludeDatabase,
         [switch]$AllDatabases,
@@ -108,11 +108,11 @@ function New-DbaDbSnapshot {
         [switch]$Force,
         [parameter(ValueFromPipeline)]
         [Microsoft.SqlServer.Management.Smo.Database[]]$InputObject,
-        [Alias('Silent')]
         [switch]$EnableException
     )
 
     begin {
+        if ($Force) {$ConfirmPreference = 'none'}
 
         $NoSupportForSnap = @('model', 'master', 'tempdb')
         # Evaluate the default suffix here for naming consistency
@@ -180,7 +180,9 @@ function New-DbaDbSnapshot {
 
             ## double check for gotchas
             foreach ($db in $dbs) {
-                if ($db.IsDatabaseSnapshot) {
+                if ($db.IsMirroringEnabled) {
+                    $InputObject += $db
+                } elseif ($db.IsDatabaseSnapshot) {
                     Write-Message -Level Warning -Message "$($db.name) is a snapshot, skipping"
                 } elseif ($db.name -in $NoSupportForSnap) {
                     Write-Message -Level Warning -Message "$($db.name) snapshots are prohibited"
@@ -191,7 +193,7 @@ function New-DbaDbSnapshot {
                 }
             }
 
-            if ($InputObject.Length -gt 1 -and $Name) {
+            if ($InputObject.Count -gt 1 -and $Name) {
                 Stop-Function -Message "You passed the Name parameter that is fixed but selected multiple databases to snapshot: use the NameSuffix parameter" -Continue -EnableException $EnableException
             }
         }
@@ -325,8 +327,5 @@ function New-DbaDbSnapshot {
                 }
             }
         }
-    }
-    end {
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -Alias New-DbaDatabaseSnapshot
     }
 }

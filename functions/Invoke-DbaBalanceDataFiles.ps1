@@ -22,7 +22,11 @@ function Invoke-DbaBalanceDataFiles {
         The target SQL Server instance or instances.
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Database
         The database(s) to process.
@@ -83,13 +87,12 @@ function Invoke-DbaBalanceDataFiles {
         By supplying this parameter you give permission to do the rebuilds offline if the edition does not support it.
 
     #>
-    [CmdletBinding(DefaultParameterSetName = "Default", SupportsShouldProcess)]
+    [CmdletBinding(DefaultParameterSetName = "Default", SupportsShouldProcess, ConfirmImpact = "Medium")]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseSingularNouns", "", Justification = "Singular Noun doesn't make sense")]
     param (
         [parameter(ParameterSetName = "Pipe", Mandatory)]
         [DbaInstanceParameter[]]$SqlInstance,
         [PSCredential]$SqlCredential,
-        [Alias("Databases")]
         [object[]]$Database,
         [Alias("Tables")]
         [object[]]$Table,
@@ -97,7 +100,9 @@ function Invoke-DbaBalanceDataFiles {
         [switch]$EnableException,
         [switch]$Force
     )
-
+    begin {
+        if ($Force) {$ConfirmPreference = 'none'}
+    }
     process {
 
         Write-Message -Message "Starting balancing out data files" -Level Verbose

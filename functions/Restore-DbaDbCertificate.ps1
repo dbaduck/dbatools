@@ -1,4 +1,3 @@
-#ValidationTags#Messaging,FlowControl,Pipeline,CodeStyle#
 function Restore-DbaDbCertificate {
     <#
     .SYNOPSIS
@@ -11,7 +10,11 @@ function Restore-DbaDbCertificate {
         The target SQL Server instance or instances.
 
     .PARAMETER SqlCredential
-        Login to the target instance using alternative credentials. Windows and SQL Authentication supported. Accepts credential objects (Get-Credential)
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Path
         The Path the contains the certificate and private key files. The path can be a directory or a specific certificate.
@@ -132,8 +135,5 @@ function Restore-DbaDbCertificate {
             }
             Get-DbaDbCertificate -SqlInstance $server -Database $Database -Certificate $smocert.Name
         }
-    }
-    end {
-        Test-DbaDeprecation -DeprecatedOn "1.0.0" -Alias Retore-DbaDatabaseCertificate
     }
 }

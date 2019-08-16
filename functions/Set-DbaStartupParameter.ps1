@@ -1,4 +1,3 @@
-#ValidationTags#Messaging,FlowControl,Pipeline,CodeStyle#
 function Set-DbaStartupParameter {
     <#
     .SYNOPSIS
@@ -15,7 +14,11 @@ function Set-DbaStartupParameter {
         If the Sql Instance is offline path parameters will be ignored as we cannot test the instance's access to the path. If you want to force this to work then please use the Force switch
 
     .PARAMETER SqlCredential
-        Windows or Sql Login Credential with permission to log into the SQL instance
+        Login to the target instance using alternative credentials. Accepts PowerShell credentials (Get-Credential).
+
+        Windows Authentication, SQL Server Authentication, Active Directory - Password, and Active Directory - Integrated are all supported.
+
+        For MFA support, please use Connect-DbaInstance.
 
     .PARAMETER Credential
         Windows Credential with permission to log on to the server running the SQL instance
@@ -171,7 +174,6 @@ function Set-DbaStartupParameter {
 #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = "High")]
     param ([parameter(Mandatory)]
-        [Alias("ServerInstance", "SqlServer")]
         [DbaInstanceParameter]$SqlInstance,
         [PSCredential]$SqlCredential,
         [PSCredential]$Credential,
@@ -192,9 +194,11 @@ function Set-DbaStartupParameter {
         [object]$StartupConfig,
         [switch]$Offline,
         [switch]$Force,
-        [Alias('Silent')]
         [switch]$EnableException
     )
+    begin {
+        if ($Force) {$ConfirmPreference = 'none'}
+    }
     process {
         if (-not $Offline) {
             try {
