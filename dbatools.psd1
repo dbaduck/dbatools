@@ -11,7 +11,7 @@
     RootModule             = 'dbatools.psm1'
 
     # Version number of this module.
-    ModuleVersion          = '1.0.35'
+    ModuleVersion          = '1.0.59'
 
     # ID used to uniquely identify this module
     GUID                   = '9d139310-ce45-41ce-8e8b-d76335aa1789'
@@ -595,10 +595,13 @@
         'Enable-DbaForceNetworkEncryption',
         'Disable-DbaForceNetworkEncryption',
         'Get-DbaForceNetworkEncryption',
+        'Disable-DbaHideInstance',
+        'Enable-DbaHideInstance',
         'Remove-DbaComputerCertificate',
         'New-DbaComputerCertificate',
         'Get-DbaComputerCertificate',
         'Add-DbaComputerCertificate',
+        'Backup-DbaComputerCertificate',
         'Get-DbaNetworkCertificate',
         'Set-DbaNetworkCertificate',
         'Invoke-DbaDbLogShipping',
