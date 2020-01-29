@@ -28,6 +28,9 @@ function Save-DbaDiagnosticQueryScript {
         Copyright: (c) 2018 by dbatools, licensed under MIT
         License: MIT https://opensource.org/licenses/MIT
 
+    .LINK
+        https://dbatools.io/Save-DbaDiagnosticQueryScript
+
     .EXAMPLE
         PS C:\> Save-DbaDiagnosticQueryScript -Path c:\temp
 
@@ -43,10 +46,10 @@ function Save-DbaDiagnosticQueryScript {
         param ($uri)
         try {
             try {
-                $data = (Invoke-TlsWebRequest -uri $uri -ErrorAction Stop)
+                $data = (Invoke-TlsWebRequest -Uri $uri -UseBasicParsing -ErrorAction Stop)
             } catch {
                 (New-Object System.Net.WebClient).Proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-                $data = (Invoke-TlsWebRequest -uri $uri -ErrorAction Stop)
+                $data = (Invoke-TlsWebRequest -Uri $uri -UseBasicParsing -ErrorAction Stop)
             }
             return $data
         } catch {
