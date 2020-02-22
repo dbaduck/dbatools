@@ -7026,13 +7026,24 @@ function Copy-DbaDbTableData {
             }
         }'
 
-        Add-Type -ReferencedAssemblies System.Data.dll -TypeDefinition $sourcecode -ErrorAction Stop
-        if (-not $script:core) {
-            try {
+        try {
+            if ($script:core) {
+                #.NET Core has moved most of the System.Data.SqlClient namespace to a separate assembly
+                $SqlClientPath = "$script:PSModuleRoot\bin\smo\coreclr\System.Data.SqlClient.dll"
+                if (Test-Path $SqlClientPath) {
+                    #Powershell 6 appears to include a version of System.Data.SqlClient.dll
+                    #that often precedes the following statement, but this enures that a version of
+                    #the assemble gets loaded before loading our custom class.
+                    Add-Type -Path $SqlClientPath
+                }
+                Add-Type -ReferencedAssemblies System.Data.SqlClient.dll -TypeDefinition $sourcecode -ErrorAction Stop
+            } else {
                 Add-Type -ReferencedAssemblies System.Data.dll -TypeDefinition $sourcecode -ErrorAction Stop
-            } catch {
-                $null = 1
             }
+            Write-Message -Level Verbose -Message "SqlBulkCopyExtension loaded."
+        } catch {
+            Stop-Function -Message 'Could not load a usable version of SqlBulkCopy.' -ErrorRecord $_
+            return
         }
 
         $bulkCopyOptions = 0
@@ -7187,7 +7198,7 @@ function Copy-DbaDbTableData {
                 try {
                     if ($Truncate -eq $true) {
                         if ($Pscmdlet.ShouldProcess($destServer, "Truncating table $fqtndest")) {
-                            $null = $destServer.Databases[$DestinationDatabase].ExecuteNonQuery("TRUNCATE TABLE $fqtndest")
+                            Invoke-DbaQuery -SqlInstance $destServer -Database $DestinationDatabase -Query "TRUNCATE TABLE $fqtndest" -EnableException
                         }
                     }
                     if ($Pscmdlet.ShouldProcess($server, "Copy data from $sourceLabel")) {
@@ -7215,11 +7226,7 @@ function Copy-DbaDbTableData {
                     if ($Pscmdlet.ShouldProcess($destServer, "Writing rows to $fqtndest")) {
                         $reader = $cmd.ExecuteReader()
                         $bulkCopy.WriteToServer($reader)
-                        if ($script:core) {
-                            $RowsTotal = "Unsupported in Core"
-                        } else {
-                            $RowsTotal = [System.Data.SqlClient.SqlBulkCopyExtension]::RowsCopiedCount($bulkCopy)
-                        }
+                        $RowsTotal = [System.Data.SqlClient.SqlBulkCopyExtension]::RowsCopiedCount($bulkCopy)
                         $TotalTime = [math]::Round($elapsed.Elapsed.TotalSeconds, 1)
                         Write-Message -Level Verbose -Message "$RowsTotal rows inserted in $TotalTime sec"
                         if ($rowCount -is [int]) {
@@ -7236,6 +7243,296 @@ function Copy-DbaDbTableData {
                             SourceDatabase      = $Database
                             SourceSchema        = $sqltable.Schema
                             SourceTable         = $sqltable.Name
+                            DestinationInstance = $destServer.Name
+                            DestinationDatabase = $DestinationDatabase
+                            DestinationSchema   = $desttable.Schema
+                            DestinationTable    = $desttable.Name
+                            RowsCopied          = $rowstotal
+                            Elapsed             = [prettytimespan]$elapsed.Elapsed
+                        }
+                    }
+                } catch {
+                    Stop-Function -Message "Something went wrong" -ErrorRecord $_ -Target $server -continue
+                }
+            }
+        }
+    }
+}
+
+#.ExternalHelp dbatools-Help.xml
+function Copy-DbaDbViewData {
+    
+    [CmdletBinding(DefaultParameterSetName = "Default", SupportsShouldProcess)]
+    param (
+        [DbaInstanceParameter]$SqlInstance,
+        [PSCredential]$SqlCredential,
+        [DbaInstanceParameter[]]$Destination,
+        [PSCredential]$DestinationSqlCredential,
+        [string]$Database,
+        [string]$DestinationDatabase,
+        [string[]]$View,
+        [string]$Query,
+        [switch]$AutoCreateTable,
+        [int]$BatchSize = 50000,
+        [int]$NotifyAfter = 5000,
+        [string]$DestinationTable,
+        [switch]$NoTableLock,
+        [switch]$CheckConstraints,
+        [switch]$FireTriggers,
+        [switch]$KeepIdentity,
+        [switch]$KeepNulls,
+        [switch]$Truncate,
+        [int]$bulkCopyTimeOut = 5000,
+        [Parameter(ValueFromPipeline)]
+        [Microsoft.SqlServer.Management.Smo.View[]]$InputObject,
+        [switch]$EnableException
+    )
+
+    begin {
+        # Getting the total rows copied is a challenge. Use SqlBulkCopyExtension.
+        # http://stackoverflow.com/questions/1188384/sqlbulkcopy-row-count-when-complete
+
+        $sourcecode = 'namespace System.Data.SqlClient {
+            using Reflection;
+
+            public static class SqlBulkCopyExtension
+            {
+                const String _rowsCopiedFieldName = "_rowsCopied";
+                static FieldInfo _rowsCopiedField = null;
+
+                public static int RowsCopiedCount(this SqlBulkCopy bulkCopy)
+                {
+                    if (_rowsCopiedField == null) _rowsCopiedField = typeof(SqlBulkCopy).GetField(_rowsCopiedFieldName, BindingFlags.NonPublic | BindingFlags.GetField | BindingFlags.Instance);
+                    return (int)_rowsCopiedField.GetValue(bulkCopy);
+                }
+            }
+        }'
+
+        try {
+            if ($script:core) {
+                #.NET Core has moved most of the System.Data.SqlClient namespace to a separate assembly
+                $SqlClientPath = "$script:PSModuleRoot\bin\smo\coreclr\System.Data.SqlClient.dll"
+                if (Test-Path $SqlClientPath) {
+                    #Powershell 6 appears to include a version of System.Data.SqlClient.dll
+                    #that often precedes the following statement, but this enures that a version of
+                    #the assemble gets loaded before loading our custom class.
+                    Add-Type -Path $SqlClientPath
+                }
+                Add-Type -ReferencedAssemblies System.Data.SqlClient.dll -TypeDefinition $sourcecode -ErrorAction Stop
+            } else {
+                Add-Type -ReferencedAssemblies System.Data.dll -TypeDefinition $sourcecode -ErrorAction Stop
+            }
+            Write-Message -Level Verbose -Message "SqlBulkCopyExtension loaded."
+        } catch {
+            Stop-Function -Message 'Could not load a usable version of SqlBulkCopy.' -ErrorRecord $_
+            return
+        }
+
+        $bulkCopyOptions = 0
+        $options = "TableLock", "CheckConstraints", "FireTriggers", "KeepIdentity", "KeepNulls", "Default"
+
+        foreach ($option in $options) {
+            $optionValue = Get-Variable $option -ValueOnly -ErrorAction SilentlyContinue
+            if ($option -eq "TableLock" -and (!$NoTableLock)) {
+                $optionValue = $true
+            }
+            if ($optionValue -eq $true) {
+                $bulkCopyOptions += $([Data.SqlClient.SqlBulkCopyOptions]::$option).value__
+            }
+        }
+    }
+
+    process {
+        if ((Test-Bound -Not -ParameterName View, SqlInstance) -and (Test-Bound -Not -ParameterName InputObject)) {
+            Stop-Function -Message "You must pipe in a view or specify SqlInstance, Database and View."
+            return
+        }
+
+        if ($SqlInstance) {
+            if ((Test-Bound -Not -ParameterName Database)) {
+                Stop-Function -Message "Database is required when passing a SqlInstance" -Target $View
+                return
+            }
+
+            if ((Test-Bound -Not -ParameterName Destination, DestinationDatabase, DestinationTable)) {
+                Stop-Function -Message "Cannot copy $View into itself. One of destination Server, Database or View must be specified " -Target $View
+                return
+            }
+
+            try {
+                $server = Connect-SqlInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential
+            } catch {
+                Stop-Function -Message "Error occurred while establishing connection to $SqlInstance" -Category ConnectionError -ErrorRecord $_ -Target $SqlInstance
+                return
+            }
+
+            if ($Database -notin $server.Databases.Name) {
+                Stop-Function -Message "Database $Database doesn't exist on $server"
+                return
+            }
+
+            try {
+                foreach ($vw in $View) {
+                    $dbView = Get-DbaDbView -SqlInstance $server -View $vw -Database $Database -EnableException -Verbose:$false
+                    if ($dbView.Count -eq 1) {
+                        $InputObject += $dbView
+                    } else {
+                        Stop-Function -Message "The view $vw matches $($dbView.Count) objects. Unable to determine which object to copy" -Continue
+                    }
+                }
+            } catch {
+                Stop-Function -Message "Unable to determine source view : $View"
+                $ex = $_.Exception
+                Write-Message -Level warning $ex.Message
+                return
+            }
+        }
+
+        foreach ($sqlview in $InputObject) {
+            $Database = $sqlview.Parent.Name
+            $server = $sqlview.Parent.Parent
+
+            if ((Test-Bound -Not -ParameterName DestinationTable)) {
+                $DestinationTable = '[' + $sqlview.Schema + '].[' + $sqlview.Name + ']'
+            }
+
+            $newTableParts = Get-ObjectNameParts -ObjectName $DestinationTable
+            #using FQTN to determine database name
+            if ($newTableParts.Database) {
+                $DestinationDatabase = $newTableParts.Database
+            } elseif ((Test-Bound -Not -ParameterName DestinationDatabase)) {
+                $DestinationDatabase = $Database
+            }
+
+            if (-not $Destination) {
+                $Destination = $server
+            }
+
+            foreach ($destinationserver in $Destination) {
+                try {
+                    $destServer = Connect-SqlInstance -SqlInstance $destinationserver -SqlCredential $DestinationSqlCredential
+                } catch {
+                    Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $destinationserver
+                    return
+                }
+
+                if ($DestinationDatabase -notin $destServer.Databases.Name) {
+                    Stop-Function -Message "Database $DestinationDatabase doesn't exist on $destServer"
+                    return
+                }
+
+                $desttable = Get-DbaDbTable -SqlInstance $destServer -Table $DestinationTable -Database $DestinationDatabase -Verbose:$false | Select-Object -First 1
+                if (-not $desttable -and $AutoCreateTable) {
+                    try {
+                        #select view into tempdb to generate script
+                        $tempTableName = "$($sqlview.Name)_table"
+                        $createquery = "SELECT * INTO tempdb..$tempTableName FROM [$($sqlview.Schema)].[$($sqlview.Name)] WHERE 1=2"
+                        Invoke-DbaQuery -SqlInstance $server -Database $Database -Query $createquery -EnableException
+                        $tempTable = Get-DbaDbTable -SqlInstance $server -Database tempdb -Table $tempTableName
+                        $tablescript = $tempTable | Export-DbaScript -Passthru | Out-String
+                        Invoke-DbaQuery -SqlInstance $server -Database $Database -Query "DROP TABLE tempdb..$tempTableName" -EnableException
+                        #replacing table name
+                        if ($newTableParts.Name) {
+                            $rX = "(CREATE TABLE \[$([regex]::Escape($tempTable.Schema))\]\.\[)$([regex]::Escape($tempTable.Name))(\]\()"
+                            $tablescript = $tablescript -replace $rX, "`$1$($newTableParts.Name)`$2"
+                        }
+                        #replacing table schema
+                        if ($newTableParts.Schema) {
+                            $rX = "(CREATE TABLE \[)$([regex]::Escape($tempTable.Schema))(\]\.\[$([regex]::Escape($newTableParts.Name))\]\()"
+                            $tablescript = $tablescript -replace $rX, "`$1$($newTableParts.Schema)`$2"
+                        }
+
+                        if ($PSCmdlet.ShouldProcess($destServer, "Creating new table: $DestinationTable")) {
+                            Write-Message -Message "New table script: $tablescript" -Level VeryVerbose
+                            Invoke-DbaQuery -SqlInstance $destServer -Database $DestinationDatabase -Query "$tablescript" -EnableException # add some string assurance there
+                            #table list was updated, let's grab a fresh one
+                            $destServer.Databases[$DestinationDatabase].Tables.Refresh()
+                            $desttable = Get-DbaDbTable -SqlInstance $destServer -Table $DestinationTable -Database $DestinationDatabase -Verbose:$false
+                            Write-Message -Message "New table created: $desttable" -Level Verbose
+                        }
+                    } catch {
+                        Stop-Function -Message "Unable to determine destination table: $DestinationTable" -ErrorRecord $_
+                        return
+                    }
+                }
+                if (-not $desttable) {
+                    Stop-Function -Message "Table $DestinationTable cannot be found in $DestinationDatabase. Use -AutoCreateTable to automatically create the table on the destination." -Continue
+                }
+
+                $connstring = $destServer.ConnectionContext.ConnectionString
+
+                if ($server.DatabaseEngineType -eq "SqlAzureDatabase") {
+                    $fqtnfrom = "$sqlview"
+                } else {
+                    $fqtnfrom = "$($server.Databases[$Database]).$sqlview"
+                }
+
+                if ($destServer.DatabaseEngineType -eq "SqlAzureDatabase") {
+                    $fqtndest = "$desttable"
+                } else {
+                    $fqtndest = "$($destServer.Databases[$DestinationDatabase]).$desttable"
+                }
+
+                if ($fqtndest -eq $fqtnfrom -and $server.Name -eq $destServer.Name -and (Test-Bound -ParameterName Query -Not)) {
+                    Stop-Function -Message "Cannot copy $fqtnfrom on $($server.Name) into $fqtndest on ($destServer.Name). Source and Destination must be different " -Target $View
+                    return
+                }
+
+
+                if (Test-Bound -ParameterName Query -Not) {
+                    $Query = "SELECT * FROM $fqtnfrom"
+                    $sourceLabel = $fqtnfrom
+                } else {
+                    $sourceLabel = "Query"
+                }
+                try {
+                    if ($Truncate -eq $true) {
+                        if ($Pscmdlet.ShouldProcess($destServer, "Truncating table $fqtndest")) {
+                            Invoke-DbaQuery -SqlInstance $destServer -Database $DestinationDatabase -Query "TRUNCATE TABLE $fqtndest" -EnableException
+                        }
+                    }
+                    if ($Pscmdlet.ShouldProcess($server, "Copy data from $sourceLabel")) {
+                        $cmd = $server.ConnectionContext.SqlConnectionObject.CreateCommand()
+                        $cmd.CommandTimeout = 0
+                        $cmd.CommandText = $Query
+                        if ($server.ConnectionContext.IsOpen -eq $false) {
+                            $server.ConnectionContext.SqlConnectionObject.Open()
+                        }
+                        $bulkCopy = New-Object Data.SqlClient.SqlBulkCopy("$connstring;Database=$DestinationDatabase", $bulkCopyOptions)
+                        $bulkCopy.DestinationTableName = $fqtndest
+                        $bulkCopy.EnableStreaming = $true
+                        $bulkCopy.BatchSize = $BatchSize
+                        $bulkCopy.NotifyAfter = $NotifyAfter
+                        $bulkCopy.BulkCopyTimeOut = $BulkCopyTimeOut
+
+                        $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
+                        # Add RowCount output
+                        $bulkCopy.Add_SqlRowsCopied( {
+                                $RowsPerSec = [math]::Round($args[1].RowsCopied / $elapsed.ElapsedMilliseconds * 1000.0, 1)
+                                Write-Progress -id 1 -activity "Inserting rows" -Status ([System.String]::Format("{0} rows ({1} rows/sec)", $args[1].RowsCopied, $RowsPerSec))
+                            })
+                    }
+
+                    if ($Pscmdlet.ShouldProcess($destServer, "Writing rows to $fqtndest")) {
+                        $reader = $cmd.ExecuteReader()
+                        $bulkCopy.WriteToServer($reader)
+                        $RowsTotal = [System.Data.SqlClient.SqlBulkCopyExtension]::RowsCopiedCount($bulkCopy)
+                        $TotalTime = [math]::Round($elapsed.Elapsed.TotalSeconds, 1)
+                        Write-Message -Level Verbose -Message "$RowsTotal rows inserted in $TotalTime sec"
+                        if ($rowCount -is [int]) {
+                            Write-Progress -id 1 -activity "Inserting rows" -status "Complete" -Completed
+                        }
+
+                        $server.ConnectionContext.SqlConnectionObject.Close()
+                        $bulkCopy.Close()
+                        $bulkCopy.Dispose()
+                        $reader.Close()
+
+                        [pscustomobject]@{
+                            SourceInstance      = $server.Name
+                            SourceDatabase      = $Database
+                            SourceSchema        = $sqlview.Schema
+                            SourceView          = $sqlview.Name
                             DestinationInstance = $destServer.Name
                             DestinationDatabase = $DestinationDatabase
                             DestinationSchema   = $desttable.Schema
@@ -14486,6 +14783,7 @@ function Export-DbaUser {
         $null = Test-ExportDirectory -Path $Path
 
         $outsql = $script:pathcollection = @()
+        $GenerateFilePerUser = $false
 
         $versions = @{
             'SQLServer2000'        = 'Version80'
@@ -14514,8 +14812,10 @@ function Export-DbaUser {
             $InputObject += Get-DbaDatabase -SqlInstance $instance -SqlCredential $SqlCredential -Database $Database -ExcludeDatabase $ExcludeDatabase
         }
 
+        # To keep the filenames generated and re-use (appedn) if needed
+        $usersProcessed = @{ }
+
         foreach ($db in $InputObject) {
-            $FilePath = Get-ExportFilePath -Path $PSBoundParameters.Path -FilePath $PSBoundParameters.FilePath -Type sql -ServerName $db.Parent.Name -Unique
 
             if ([string]::IsNullOrEmpty($destinationVersion)) {
                 #Get compatibility level for scripting the objects
@@ -14544,15 +14844,37 @@ function Export-DbaUser {
                 $users = $db.Users
             }
 
+            # Generate the file path
+            if (Test-Bound -ParameterName FilePath -Not) {
+                $GenerateFilePerUser = $true
+            } else {
+                # Generate a new file name with passed/default path
+                $FilePath = Get-ExportFilePath -Path $PSBoundParameters.Path -FilePath $PSBoundParameters.FilePath -Type sql -ServerName $db.Parent.Name -Unique
+                # Force append to have everything on same file
+                $Append = $true
+            }
+
             # Store roles between users so if we hit the same one we don't create it again
             $roles = @()
             $stepCounter = 0
             foreach ($dbuser in $users) {
-                Write-ProgressHelper -TotalSteps $users.Count -Activity "Exporting from $($db.Name)" -StepNumber ($stepCounter++) -Message "Generating script for user $dbuser"
+
+                if ($GenerateFilePerUser) {
+                    if ($null -eq $usersProcessed[$dbuser.Name]) {
+                        # If user and not specific output file, create file name without database name.
+                        $FilePath = Get-ExportFilePath -Path $PSBoundParameters.Path -FilePath $PSBoundParameters.FilePath -Type sql -ServerName $("$($db.Parent.Name)-$($dbuser.Name)") -Unique
+                        $usersProcessed[$dbuser.Name] = $FilePath
+                    } else {
+                        $Append = $true
+                        $FilePath = $usersProcessed[$dbuser.Name]
+                    }
+                }
+
+                Write-ProgressHelper -TotalSteps $users.Count -Activity "Exporting from $($db.Name)" -StepNumber ($stepCounter++) -Message "Generating script ($FilePath) for user $dbuser"
 
                 #setting database
                 if (((Test-Bound ScriptingOptionsObject) -and $ScriptingOptionsObject.IncludeDatabaseContext) -or - (Test-Bound ScriptingOptionsObject -Not)) {
-                    $outsql += "USE [" + $db.Name + "]"
+                    $useDatabase = "USE [" + $db.Name + "]"
                 }
 
                 try {
@@ -14748,23 +15070,43 @@ function Export-DbaUser {
                 } catch {
                     Stop-Function -Message "This user may be using functionality from $($versionName[$db.CompatibilityLevel.ToString()]) that does not exist on the destination version ($versionNameDesc)." -Continue -InnerErrorRecord $_ -Target $db
                 }
-            }
 
-            if ($ExcludeGoBatchSeparator) {
-                $sql = $outsql
-            } else {
-                $sql = $outsql -join "`r`nGO`r`n"
-                #add the final GO
-                $sql += "`r`nGO"
-            }
-            if (-not $Passthru) {
-                $sql | Out-File -Encoding UTF8 -FilePath $FilePath -Append:$Append -NoClobber:$NoClobber
-                Get-ChildItem -Path $FilePath
-            } else {
-                $sql
+                if (@($perms.Count) -gt 0) {
+                    if ($ExcludeGoBatchSeparator) {
+                        $sql = "$useDatabase $outsql"
+                    } else {
+                        if ($useDatabase) {
+                            $sql = "$useDatabase`r`nGO`r`n" + ($outsql -join "`r`nGO`r`n")
+                        } else {
+                            $sql = $outsql -join "`r`nGO`r`n"
+                        }
+                        #add the final GO
+                        $sql += "`r`nGO"
+                    }
+                }
+
+                if (-not $Passthru) {
+                    # If generate a file per user, clean the collection to populate with next one
+                    if ($GenerateFilePerUser) {
+                        if (-not [string]::IsNullOrEmpty($sql)) {
+                            $sql | Out-File -Encoding UTF8 -FilePath $FilePath -Append:$Append -NoClobber:$NoClobber
+                            Get-ChildItem -Path $FilePath
+                        }
+                    } else {
+                        $sql | Out-File -Encoding UTF8 -FilePath $FilePath -Append:$Append -NoClobber:$NoClobber
+                    }
+                    # Clear variables for next user
+                    $outsql = @()
+                    $sql = ""
+                } else {
+                    $sql
+                }
             }
         }
-
+        # Just a single file, output path once here
+        if (-Not $GenerateFilePerUser) {
+            Get-ChildItem -Path $FilePath
+        }
     }
 }
 
@@ -25792,6 +26134,7 @@ function Get-DbaDbTable {
             $server = $db.Parent
             Write-Message -Level Verbose -Message "Processing $db"
 
+            $db.Tables.Refresh($true) # This will ensure the list of tables is up-to-date
             if ($fqtns) {
                 $tables = @()
                 foreach ($fqtn in $fqtns) {
@@ -25987,17 +26330,66 @@ function Get-DbaDbView {
         [object[]]$Database,
         [object[]]$ExcludeDatabase,
         [switch]$ExcludeSystemView,
+        [string[]]$View,
         [Parameter(ValueFromPipeline)]
         [Microsoft.SqlServer.Management.Smo.Database[]]$InputObject,
         [switch]$EnableException
     )
+
+    begin {
+        if ($View) {
+            $fqtns = @()
+            foreach ($v in $View) {
+                $fqtn = Get-ObjectNameParts -ObjectName $v
+
+                if (-not $fqtn.Parsed) {
+                    Write-Message -Level Warning -Message "Please check you are using proper three-part names. If your search value contains special characters you must use [ ] to wrap the name. The value $t could not be parsed as a valid name."
+                    Continue
+                }
+
+                $fqtns += [PSCustomObject] @{
+                    Database   = $fqtn.Database
+                    Schema     = $fqtn.Schema
+                    View       = $fqtn.Name
+                    InputValue = $fqtn.InputValue
+                }
+            }
+            if (-not $fqtns) {
+                Stop-Function -Message "No Valid View specified"  -ErrorRecord $_ -Target $instance -Continue
+            }
+        }
+    }
+
     process {
         if (Test-Bound SqlInstance) {
             $InputObject = Get-DbaDatabase -SqlInstance $SqlInstance -SqlCredential $SqlCredential -Database $Database -ExcludeDatabase $ExcludeDatabase
         }
 
         foreach ($db in $InputObject) {
-            $views = $db.views
+
+            $db.Views.Refresh($true) # This will ensure the list of views is up-to-date
+            if ($fqtns) {
+                $views = @()
+                foreach ($fqtn in $fqtns) {
+                    # If the user specified a database in a three-part name, and it's not the
+                    # database currently being processed, skip this view.
+                    if ($fqtn.Database) {
+                        if ($fqtn.Database -ne $db.Name) {
+                            continue
+                        }
+                    }
+
+                    $vw = $db.Views | Where-Object { $_.Name -in $fqtn.View -and $fqtn.Schema -in ($_.Schema, $null) -and $fqtn.Database -in ($_.Parent.Name, $null) }
+
+                    if (-not $vw) {
+                        Write-Message -Level Verbose -Message "Could not find view $($fqtn.Name) in $db on $server"
+                    }
+                    $views += $vw
+                }
+            } else {
+                $views = $db.Views
+            }
+
             if (-not $db.IsAccessible) {
                 Write-Message -Level Warning -Message "Database $db is not accessible. Skipping"
                 continue
@@ -26012,14 +26404,14 @@ function Get-DbaDbView {
             }
 
             $defaults = 'ComputerName', 'InstanceName', 'SqlInstance', 'Database', 'Schema', 'CreateDate', 'DateLastModified', 'Name'
-            foreach ($view in $views) {
+            foreach ($sqlview in $views) {
 
-                Add-Member -Force -InputObject $view -MemberType NoteProperty -Name ComputerName -value $view.Parent.ComputerName
-                Add-Member -Force -InputObject $view -MemberType NoteProperty -Name InstanceName -value $view.Parent.InstanceName
-                Add-Member -Force -InputObject $view -MemberType NoteProperty -Name SqlInstance -value $view.Parent.SqlInstance
-                Add-Member -Force -InputObject $view -MemberType NoteProperty -Name Database -value $db.Name
+                Add-Member -Force -InputObject $sqlview -MemberType NoteProperty -Name ComputerName -value $sqlview.Parent.ComputerName
+                Add-Member -Force -InputObject $sqlview -MemberType NoteProperty -Name InstanceName -value $sqlview.Parent.InstanceName
+                Add-Member -Force -InputObject $sqlview -MemberType NoteProperty -Name SqlInstance -value $sqlview.Parent.SqlInstance
+                Add-Member -Force -InputObject $sqlview -MemberType NoteProperty -Name Database -value $db.Name
 
-                Select-DefaultView -InputObject $view -Property $defaults
+                Select-DefaultView -InputObject $sqlview -Property $defaults
             }
         }
     }
@@ -41125,9 +41517,14 @@ Function Invoke-DbaAdvancedUpdate {
             } else {
                 $instanceClause = '/allinstances'
             }
+            if ($currentAction.Build -like "10.0.*") {
+                $argumentList = @('/quiet', $instanceClause)
+            } else {
+                $argumentList = @('/quiet', $instanceClause, '/IAcceptSQLServerLicenseTerms')
+            }
             Write-ProgressHelper -ExcludePercent -Activity $activity -Message "Now installing update SQL$($currentAction.MajorVersion)$($currentAction.TargetLevel) from $spExtractPath"
             Write-Message -Level Verbose -Message "Starting installation from $spExtractPath"
-            $updateResult = Invoke-Program @execParams -Path "$spExtractPath\setup.exe" -ArgumentList @('/quiet', $instanceClause, '/IAcceptSQLServerLicenseTerms') -WorkingDirectory $spExtractPath -Fallback
+            $updateResult = Invoke-Program @execParams -Path "$spExtractPath\setup.exe" -ArgumentList $argumentList -WorkingDirectory $spExtractPath -Fallback
             $output.ExitCode = $updateResult.ExitCode
             if ($updateResult.Successful) {
                 $output.Successful = $true
@@ -46016,14 +46413,14 @@ function Invoke-DbaDiagnosticQuery {
         }
 
         $scriptversions = @()
-        $scriptfiles = Get-ChildItem -Path "$Path\SQLServerDiagnosticQueries_*_*.sql"
+        $scriptfiles = Get-ChildItem -Path "$Path\SQLServerDiagnosticQueries_*.sql"
 
         if (!$scriptfiles) {
             Write-Message -Level Warning -Message "Diagnostic scripts not found in $Path. Using the ones within the module."
 
             $Path = Join-Path -Path $base -ChildPath "\bin\diagnosticquery"
 
-            $scriptfiles = Get-ChildItem "$base\bin\diagnosticquery\SQLServerDiagnosticQueries_*_*.sql"
+            $scriptfiles = Get-ChildItem "$base\bin\diagnosticquery\SQLServerDiagnosticQueries_*.sql"
             if (!$scriptfiles) {
                 Stop-Function -Message "Unable to download scripts, do you have an internet connection? $_" -ErrorRecord $_
                 return
@@ -53191,7 +53588,7 @@ function New-DbaDiagnosticAdsNotebook {
             }
         }
 
-        $diagnosticScriptPath = Get-ChildItem -Path "$($script:PSModuleRoot)\bin\diagnosticquery\" -Filter "SQLServerDiagnosticQueries_$($TargetVersion)_??????.sql" | Select-Object -First 1
+        $diagnosticScriptPath = Get-ChildItem -Path "$($script:PSModuleRoot)\bin\diagnosticquery\" -Filter "SQLServerDiagnosticQueries_$($TargetVersion).sql" | Select-Object -First 1
 
         if (-not $diagnosticScriptPath) {
             Stop-Function -Message "No diagnostic queries available for `$TargetVersion = $TargetVersion"
@@ -60357,7 +60754,7 @@ function Restore-DbaDatabase {
 
         #region Validation
         try {
-            $RestoreInstance = Connect-SqlInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential
+            $RestoreInstance = Connect-SqlInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential -Database master
         } catch {
             Stop-Function -Message "Error occurred while establishing connection to $SqlInstance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             return
@@ -61081,41 +61478,29 @@ function Save-DbaDiagnosticQueryScript {
     }
 
     Add-Type -AssemblyName System.Web
-    $glenberryrss = "http://www.sqlskills.com/blogs/glenn/feed/"
-    $glenberrysql = @()
 
-    Write-Message -Level Verbose -Message "Downloading RSS Feed"
-    $rss = [xml](get-webdata -uri $glenberryrss)
-    $Feed = $rss.rss.Channel
-
-    $glenberrysql = @()
-    $RssPostFilter = "SQL Server Diagnostic Information Queries for*"
+    $glennberryResources = "https://glennsqlperformance.com/resources/"
     $DropboxLinkFilter = "*dropbox.com*"
     $LinkTitleFilter = "*Diagnostic Information Queries*"
-    $ExcludeSpreadsheet = "*BlankResutsSpreadsheet*"
+    $ExcludeSpreadsheet = "*Results Spreadsheet*"
 
-    foreach ($post in $Feed.item) {
-        if ($post.title -like $RssPostFilter) {
-            # We found the first post that matches it, lets go visit and scrape.
-            $page = Get-WebData -uri $post.link
-            $glenberrysql += ($page.Links | Where-Object { $_.href -like $DropboxLinkFilter -and $_.outerHTML -like $LinkTitleFilter -and $_.outerHTML -notlike $ExcludeSpreadsheet } | ForEach-Object {
-                    [pscustomobject]@{
-                        URL        = $_.href
-                        SQLVersion = $_.outerHTML -replace "<.+`">", "" -replace "</a>", "" -replace " Diagnostic Information Queries", "" -replace "SQL Server ", "" -replace ' ', ''
-                        FileYear   = ($post.title -split " ")[-1]
-                        FileMonth  = "{0:00}" -f [int]([CultureInfo]::InvariantCulture.DateTimeFormat.MonthNames.IndexOf(($post.title -split " ")[-2]))
-                    }
-                })
-            break
-        }
-    }
+    Write-Message -Level Verbose -Message "Downloading Glenn Berry Resources Page"
+    $page = Get-WebData -uri $glennberryResources
+
+    $glenberrysql += ($page.Links | Where-Object { $_.href -like $DropboxLinkFilter -and $_.outerHTML -like $LinkTitleFilter -and $_.outerHTML -notlike $ExcludeSpreadsheet } | ForEach-Object {
+            [pscustomobject]@{
+                URL        = $_.href
+                SQLVersion = $_.outerHTML -replace "<.+`">", "" -replace "</a>", "" -replace " Diagnostic Information Queries", "" -replace "SQL Server ", "" -replace ' ', ''
+            }
+        })
+
     Write-Message -Level Verbose -Message "Found $($glenberrysql.Count) documents to download"
     foreach ($doc in $glenberrysql) {
         try {
             $link = $doc.URL.ToString().Replace('dl=0', 'dl=1')
             Write-Message -Level Verbose -Message "Downloading $link)"
             Write-ProgressHelper -Activity "Downloading Glenn Berry's most recent DMVs" -ExcludePercent -Message "Downloading $link" -StepNumber 1
-            $filename = Join-Path -Path $Path  -ChildPath "SQLServerDiagnosticQueries_$($doc.SQLVersion)_$("$($doc.FileYear)$($doc.FileMonth)").sql"
+            $filename = Join-Path -Path $Path  -ChildPath "SQLServerDiagnosticQueries_$($doc.SQLVersion).sql"
             Invoke-TlsWebRequest -Uri $link -OutFile $filename -ErrorAction Stop
             Get-ChildItem -Path $filename
         } catch {
@@ -71536,12 +71921,24 @@ function Test-DbaMaxDop {
                 }
             } else {
                 #Server with multiple NUMA nodes
-                if (($numberOfCores / $NumaNodes) -lt 8) {
-                    # Less than 8 logical processors per NUMA node - Keep MAXDOP at or below # of logical processors per NUMA node
-                    $recommendedMaxDop = [int]($numberOfCores / $NumaNodes)
+                if ($server.VersionMajor -ge 13) {
+                    if (($numberOfCores / $NumaNodes) -lt 16) {
+                        # On SQL2016+ - Less than 16 logical processors per NUMA node - Keep MAXDOP at or below # of logical processors per NUMA node
+                        $recommendedMaxDop = [int]($numberOfCores / $NumaNodes)
+                    } else {
+                        # Greater than 16 logical processors per NUMA node - Keep MAXDOP at 16
+                        $recommendedMaxDop = 16
+                    }
                 } else {
                     # Greater than 8 logical processors per NUMA node - Keep MAXDOP at 8
                     $recommendedMaxDop = 8
+                    if (($numberOfCores / $NumaNodes) -lt 8) {
+                        # On previous SQL Server versions - Less than 8 logical processors per NUMA node - Keep MAXDOP at or below # of logical processors per NUMA node
+                        $recommendedMaxDop = [int]($numberOfCores / $NumaNodes)
+                    } else {
+                        # Greater than 8 logical processors per NUMA node - Keep MAXDOP at 8
+                        $recommendedMaxDop = 8
+                    }
                 }
             }
 
@@ -74194,13 +74591,16 @@ function Write-DbaDbTableData {
 
         $quotedFQTN = New-Object System.Text.StringBuilder
 
-        [void]$quotedFQTN.Append( '[' )
-        if ($databaseName.Contains(']')) {
-            [void]$quotedFQTN.Append( $databaseName.Replace(']', ']]') )
-        } else {
-            [void]$quotedFQTN.Append( $databaseName )
+        if ($server.ServerType -ne 'SqlAzureDatabase') {
+            
+            [void]$quotedFQTN.Append( '[' )
+            if ($databaseName.Contains(']')) {
+                [void]$quotedFQTN.Append( $databaseName.Replace(']', ']]') )
+            } else {
+                [void]$quotedFQTN.Append( $databaseName )
+            }
+            [void]$quotedFQTN.Append( '].' )
         }
-        [void]$quotedFQTN.Append( '].' )
 
         [void]$quotedFQTN.Append( '[' )
         if ($schemaName.Contains(']')) {
@@ -74288,13 +74688,9 @@ function Write-DbaDbTableData {
                 }
             }
         }
+        # Create SqlBulkCopy object - Database name needs to be appended as not set in $server.ConnectionContext
+        $bulkCopy = New-Object Data.SqlClient.SqlBulkCopy("$($server.ConnectionContext.ConnectionString);Database=$databaseName", $bulkCopyOptions)
 
-        if ($server.isAzure) {
-            # will for sure have the database in connstring
-            $bulkCopy = New-Object Data.SqlClient.SqlBulkCopy($server.ConnectionContext.ConnectionString, $bulkCopyOptions)
-        } else {
-            $bulkCopy = New-Object Data.SqlClient.SqlBulkCopy("$($server.ConnectionContext.ConnectionString);Database=$databaseName", $bulkCopyOptions)
-        }
         $bulkCopy.DestinationTableName = $fqtn
         $bulkCopy.BatchSize = $BatchSize
         $bulkCopy.NotifyAfter = $NotifyAfter
@@ -74575,6 +74971,7 @@ function Connect-SqlInstance {
         [PSCredential]$SqlCredential,
         [int]$StatementTimeout,
         [int]$MinimumVersion,
+        [string]$Database,
         [switch]$AzureUnsupported,
         [switch]$NonPooled
     )
