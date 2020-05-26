@@ -258,7 +258,7 @@ function Get-DbaDbBackupHistory {
                             $AgResults += $AgLoopResults | Where-Object { $_.Database -eq $AgDb } | Sort-Object -Property FirstLsn | Select-Object -Last 1
                         }
                     } else {
-                        $AgResults += $AgLoopResult
+                        $AgResults += $AgLoopResults
                     }
                     # Results are already in the correct format so drop to output
                     $agresults
@@ -369,7 +369,7 @@ function Get-DbaDbBackupHistory {
                             if (-not $LastFull) {
                                 Write-Message -Message "Found backups from multiple recovery forks for $($db.name) on $($server.name), this may affect your results" -Level Warning
                                 foreach ($result in $results) {
-                                    Write-Message -Message "Between $($result.MinDate)/$($result.FirstLsn) and $($result.MaxDate)/$($result.FinalLsn) $($result.name) was on Recovery Fork GUID $($result.RecFork) ($($result.backupcount) backups)" -Level Warning
+                                    Write-Message -Message "Between $($result.MinDate)/$($result.FirstLsn) and $($result.MaxDate)/$($result.FinalLsn) $($result.database_name) was on Recovery Fork GUID $($result.RecFork) ($($result.backupcount) backups)" -Level Warning
                                 }
                             }
                             if ($null -eq $RecoveryFork) {
@@ -448,7 +448,7 @@ function Get-DbaDbBackupHistory {
                             if (-not $LastFull) {
                                 Write-Message -Message "Found backups from multiple recovery forks for $($db.name) on $($server.name), this may affect your results" -Level Warning
                                 foreach ($result in $results) {
-                                    Write-Message -Message "Between $($result.MinDate)/$($result.FirstLsn) and $($result.MaxDate)/$($result.FinalLsn) $($result.name) was on Recovery Fork GUID $($result.RecFork) ($($result.backupcount) backups)"   -Level Warning
+                                    Write-Message -Message "Between $($result.MinDate)/$($result.FirstLsn) and $($result.MaxDate)/$($result.FinalLsn) $($result.database_name) was on Recovery Fork GUID $($result.RecFork) ($($result.backupcount) backups)"   -Level Warning
                                 }
                             }
                         }
